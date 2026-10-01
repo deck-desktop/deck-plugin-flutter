@@ -1,0 +1,8 @@
+{
+  "id": "flutter",
+  "name": "Flutter",
+  "description": "Launch a Flutter app on a device, then hot reload it from the footer.",
+  "icon": "Zap",
+  "version": "1.0.0",
+  "minDeck": "0.11.0"
+}
