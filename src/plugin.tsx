@@ -19,11 +19,13 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   Zap, RotateCw, Square, Play, Smartphone, Monitor, Globe, Loader2, X, Copy, Trash2, WrapText, Clock,
 } from "lucide-react";
-import { configRead, exec, fsRead, type ExecOut } from "../shim/bridge.js";
+import { configRead, exec, fsList, fsRead, type ExecOut } from "../shim/bridge.js";
 import { termWrite, getLayout, useLayout, type Layout } from "../shim/terminals.js";
 import {
-  isFlutterRun, runForFile, parseDevices, type Device, type FlutterRun, type PaneProcs,
+  isFlutterRun, runForFile, parseDevices, isFlutterPubspec, shouldDescend, ownerWorkspace, appLabel,
+  type Device, type FlutterRun, type PaneProcs,
 } from "./detect.js";
+import { ContextMenu, type MenuEntry } from "../shim/ui.js";
 import { parseStackFrame, frameFile } from "./daemon.js";
 import * as store from "./store.js";
 import { matcher, regexSyntax, validRegex } from "./filter.js";
@@ -61,14 +63,23 @@ async function findPaneRuns(l: Layout | null): Promise<FlutterRun[]> {
 }
 
 /**
- * Whether a directory is a Flutter project, by pubspec.yaml — a pubspec with a flutter dependency,
- * not merely any pubspec, since a pure Dart package has one too.
+ * The Flutter apps in a workspace: its own folder, and any nested under it.
  *
- * Answers are cached per directory because two callers need them and one of them (`panelWhen`) is
- * synchronous and runs on every footer render; re-reading the file that often would be a disk hit
- * per frame. A project does not stop being one while Deck is open, so the cache never expires.
+ * A workspace is often not one app. A package's runnable app is its example/, a monorepo keeps
+ * apps under apps/ or beside packages/, and the workspace root may have no pubspec at all — so
+ * asking only "is the root a Flutter project" both missed apps and offered packages that cannot
+ * be run. An app here is a pubspec that names flutter AND a lib/main.dart.
+ *
+ * Breadth-first to a fixed depth, skipping build output and platform folders (see shouldDescend).
+ * ponytail: depth 3 and a cap on folders visited bound the cost on a huge tree; an app deeper than
+ * that is not offered, and the fix is raising MAX_DEPTH, not a smarter walk.
+ *
+ * Cached per workspace folder because `panelWhen` is synchronous and runs on every footer render.
+ * The picker re-scans each time it opens, so an app created mid-session appears there.
  */
-const projectCache = new Map<string, boolean>();
+const appsCache = new Map<string, string[]>();
+const MAX_DEPTH = 3;
+const MAX_DIRS = 400;
 
 /** The active workspace's directory, read straight from the layout store. */
 function currentCwd(): string {
@@ -76,18 +87,42 @@ function currentCwd(): string {
   return l?.workspaces.find((w) => w.id === l.activeWs)?.cwd ?? "";
 }
 
-async function isFlutterProject(cwd: string): Promise<boolean> {
-  if (!cwd) return false;
-  const seen = projectCache.get(cwd);
-  if (seen !== undefined) return seen;
-  let ok = false;
+async function isApp(dir: string, entries: { name: string; dir: boolean }[]): Promise<boolean> {
+  if (!entries.some((e) => !e.dir && e.name === "pubspec.yaml")) return false;
+  if (!entries.some((e) => e.dir && e.name === "lib")) return false;
   try {
-    const y = await fsRead(`${cwd}/pubspec.yaml`);
-    ok = /^\s*flutter\s*:/m.test(y) || /sdk:\s*flutter/m.test(y);
-  } catch { ok = false; }
-  projectCache.set(cwd, ok);
-  return ok;
+    if (!isFlutterPubspec(await fsRead(`${dir}/pubspec.yaml`))) return false;
+    return (await fsList(`${dir}/lib`)).some((e) => !e.dir && e.name === "main.dart");
+  } catch { return false; }
 }
+
+async function scanApps(root: string): Promise<string[]> {
+  if (!root) return [];
+  const found: string[] = [];
+  let level = [root];
+  let visited = 0;
+  for (let depth = 0; depth <= MAX_DEPTH && level.length && visited < MAX_DIRS; depth++) {
+    const next: string[] = [];
+    await Promise.all(level.map(async (dir) => {
+      visited++;
+      let entries: { name: string; path: string; dir: boolean }[] = [];
+      try { entries = await fsList(dir); } catch { return; }
+      if (await isApp(dir, entries)) found.push(dir);
+      for (const e of entries) if (e.dir && shouldDescend(e.name)) next.push(e.path);
+    }));
+    level = next;
+  }
+  // The root first, then the rest by path, so the order is the same every time it opens.
+  found.sort((a, b) => (a === root ? -1 : b === root ? 1 : a.localeCompare(b)));
+  appsCache.set(root, found);
+  return found;
+}
+
+/** The cached answer when there is one, else a scan. */
+const appsIn = (root: string) => {
+  const seen = appsCache.get(root);
+  return seen ? Promise.resolve(seen) : scanApps(root);
+};
 
 /**
  * The project's own package name, from pubspec.yaml — what a `package:` stack frame is prefixed
@@ -119,6 +154,22 @@ const deviceIcon = (platform: string) => ICONS[platform.split("-")[0]] ?? Smartp
 
 /** Subscribe to the runs store. */
 const useRuns = () => useSyncExternalStore(store.subscribe, store.getRuns);
+
+/**
+ * The runs that belong to the active workspace — the one whose folder holds the run's — plus any
+ * run no workspace claims.
+ *
+ * Without this, opening another workspace showed the first one's apps, and its buttons reloaded
+ * them. The unclaimed ones are shown everywhere rather than nowhere: an agent can start a run in
+ * any folder, and a run nobody can see is a run nobody can stop.
+ */
+function runsHere(runs: store.Run[], l: Layout | null): store.Run[] {
+  if (!l) return runs;
+  return runs.filter((r) => {
+    const owner = ownerWorkspace(l.workspaces, r.cwd);
+    return owner === null || owner === l.activeWs;
+  });
+}
 
 /** The pane runs, polled. Shared by the tab and the footer. */
 function usePaneRuns() {
@@ -175,77 +226,75 @@ void configRead(RELOAD_KEY)
 
 wireSaveReload();
 
-/** Pick a device, then launch. Used from the footer readout and the drawer's empty state. */
-function DevicePicker({ cwd, onPick, children }: {
-  cwd: string;
-  onPick: (d: Device) => void;
+/**
+ * Pick an app and a device, then launch. Used from the footer readout and the panel.
+ *
+ * With one app in the workspace the menu is just its devices. With several, each app is a row
+ * whose submenu is the devices, so running a package's example/ is two clicks rather than
+ * impossible.
+ *
+ * Deck's own ContextMenu rather than a hand-placed box: it flips and clamps to the window. The
+ * box this replaced always opened upward, which suited the footer and clipped off the top of the
+ * screen when the panel sat in a pane near the top.
+ */
+function DevicePicker({ root, onPick, children }: {
+  root: string;
+  onPick: (app: string, d: Device) => void;
   children: React.ReactNode;
 }) {
-  const [open, setOpen] = useState(false);
+  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+  const [apps, setApps] = useState<string[] | null>(null);
   const [devices, setDevices] = useState<Device[] | null>(null);
-  // Where to paint the menu, in viewport coordinates.
-  const [at, setAt] = useState({ left: 0, bottom: 0 });
   const anchor = useRef<HTMLButtonElement>(null);
+  const open = at !== null;
 
-  // Fetched when the menu opens, never on a poll: `flutter devices` probes adb and the browsers
-  // and takes several seconds, which is fine once on a click and not fine every 10s.
+  // Both fetched when the menu opens, never on a poll: `flutter devices` probes adb and the
+  // browsers and takes several seconds, which is fine once on a click and not fine every 10s.
   useEffect(() => {
     if (!open) return;
     let alive = true;
+    setApps(null);
     setDevices(null);
-    exec("flutter", ["devices", "--machine"], cwd)
-      .then((r: ExecOut) => { if (alive) setDevices(parseDevices(r.stdout)); })
-      .catch(() => { if (alive) setDevices([]); });
+    void scanApps(root).then((a) => {
+      if (!alive) return;
+      setApps(a);
+      exec("flutter", ["devices", "--machine"], a[0] ?? root)
+        .then((r: ExecOut) => { if (alive) setDevices(parseDevices(r.stdout)); })
+        .catch(() => { if (alive) setDevices([]); });
+    });
     return () => { alive = false; };
-  }, [open, cwd]);
+  }, [open, root]);
 
-  /**
-   * Measure the button and open above it.
-   *
-   * FIXED, not absolute. This button lives in the footer strip, which is 32px tall — an absolutely
-   * positioned child is laid out inside that box, so a menu opening upward had no room and was
-   * clipped away entirely. Fixed positioning takes it out of the strip's flow and off its
-   * ancestors' overflow, so the only thing that constrains it is the window.
-   */
   const toggle = () => {
-    if (!open && anchor.current) {
-      const r = anchor.current.getBoundingClientRect();
-      // Right-aligned to the button, clamped so a wide device name cannot run off the left edge.
-      setAt({ left: Math.max(8, r.right - 224), bottom: window.innerHeight - r.top + 6 });
-    }
-    setOpen((v) => !v);
+    if (open || !anchor.current) { setAt(null); return; }
+    const r = anchor.current.getBoundingClientRect();
+    // Raised from whichever edge has room, so it opens away from the button rather than over it.
+    const below = window.innerHeight - r.bottom;
+    setAt({ x: r.right, y: below >= r.top ? r.bottom + 4 : r.top - 4 });
   };
+
+  const deviceItems = (app: string): MenuEntry[] => {
+    if (devices === null) return [{ label: "Finding devices…", disabled: true }];
+    if (!devices.length) return [{ label: "No devices found", disabled: true }];
+    return devices.map((d) => ({
+      label: d.name,
+      subLabel: d.emulator ? "emulator" : undefined,
+      icon: deviceIcon(d.platform),
+      onClick: () => { setAt(null); onPick(app, d); },
+    }));
+  };
+
+  const items: MenuEntry[] =
+    apps === null ? [{ label: "Looking for apps…", disabled: true }]
+    : !apps.length ? [{ label: "No Flutter app in this workspace", disabled: true }]
+    : apps.length === 1 ? deviceItems(apps[0])
+    : apps.map((a) => ({ label: appLabel(root, a), icon: Smartphone, children: deviceItems(a) }));
 
   return (
     <>
-      <button ref={anchor} onClick={toggle} title="Run this Flutter app">{children}</button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-[90]" onClick={() => setOpen(false)} />
-          <div style={{ left: at.left, bottom: at.bottom, minWidth: 216 }}
-            className="fixed z-[100] rounded border border-subtle bg-elev py-1 shadow-2xl">
-            {devices === null && (
-              <div className="flex items-center gap-2 px-3 py-1.5 text-[11px] text-text-muted">
-                <Loader2 size={11} className="animate-spin" /> Finding devices…
-              </div>
-            )}
-            {devices?.length === 0 && (
-              <div className="px-3 py-1.5 text-[11px] text-text-muted">No devices found</div>
-            )}
-            {devices?.map((d) => {
-              const Icon = deviceIcon(d.platform);
-              return (
-                <button key={d.id} onClick={() => { setOpen(false); onPick(d); }}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-text-secondary hover:bg-white/10 hover:text-text-primary">
-                  <Icon size={11} />
-                  <span className="flex-1 truncate">{d.name}</span>
-                  {d.emulator && <span className="text-[9px] text-text-muted">emu</span>}
-                </button>
-              );
-            })}
-          </div>
-        </>
-      )}
+      <button ref={anchor} onClick={toggle} onMouseDown={(e) => e.stopPropagation()}
+        title="Run a Flutter app">{children}</button>
+      {at && <ContextMenu x={at.x} y={at.y} alignRight items={items} onClose={() => setAt(null)} />}
     </>
   );
 }
@@ -348,8 +397,8 @@ const prefs: Partial<Prefs> = (() => {
  * resizing it, and it keeps running when you switch tabs, both of which a module cannot do.
  */
 export function Panel() {
-  const runs = useRuns();
   const layout = useLayout();
+  const runs = runsHere(useRuns(), layout);
   const [selected, setSelected] = useState<string | null>(prefs.selected ?? null);
   const [launchable, setLaunchable] = useState(false);
   const [q, setQ] = useState(prefs.q ?? "");
@@ -370,7 +419,7 @@ export function Panel() {
 
   useEffect(() => {
     let alive = true;
-    void isFlutterProject(wsCwd).then((ok) => { if (alive) setLaunchable(ok); });
+    void appsIn(wsCwd).then((a) => { if (alive) setLaunchable(a.length > 0); });
     return () => { alive = false; };
   }, [wsCwd]);
 
@@ -437,14 +486,14 @@ export function Panel() {
         <Zap size={28} className="opacity-40" />
         <p className="text-sm">No app running.</p>
         {launchable ? (
-          <DevicePicker cwd={wsCwd}
-            onPick={(d) => { void store.start(wsCwd, d.id, d.name).then(setSelected); }}>
+          <DevicePicker root={wsCwd}
+            onPick={(app, d) => { void store.start(app, d.id, d.name).then(setSelected); }}>
             <span className="flex items-center gap-1.5 rounded bg-white/10 px-3 py-1.5 text-xs text-text-primary hover:bg-white/15">
               <Play size={12} /> Run on a device
             </span>
           </DevicePicker>
         ) : (
-          <p className="text-xs">The current workspace is not a Flutter project.</p>
+          <p className="text-xs">No Flutter app in this workspace.</p>
         )}
       </div>
     );
@@ -510,8 +559,8 @@ export function Panel() {
           </>
         )}
         {launchable && (
-          <DevicePicker cwd={wsCwd}
-            onPick={(d) => { void store.start(wsCwd, d.id, d.name).then(setSelected); }}>
+          <DevicePicker root={wsCwd}
+            onPick={(app, d) => { void store.start(app, d.id, d.name).then(setSelected); }}>
             <span className="grid h-6 w-6 place-items-center rounded text-text-secondary hover:bg-white/10 hover:text-text-primary">
               <Play size={12} />
             </span>
@@ -626,8 +675,8 @@ export function Panel() {
  * Editor, and the footer is visible everywhere.
  */
 export function Status() {
-  const daemonRuns = useRuns().filter((r) => r.status !== "ended");
   const layout = useLayout();
+  const daemonRuns = runsHere(useRuns(), layout).filter((r) => r.status !== "ended");
   const paneRuns = usePaneRuns().filter((r) => r.wsId === layout?.activeWs);
   const [busy, setBusy] = useState("");
   const wsCwd = layout?.workspaces.find((w) => w.id === layout.activeWs)?.cwd ?? "";
@@ -638,7 +687,7 @@ export function Status() {
   const [isProject, setIsProject] = useState(false);
   useEffect(() => {
     let alive = true;
-    void isFlutterProject(wsCwd).then((ok) => { if (alive) setIsProject(ok); });
+    void appsIn(wsCwd).then((a) => { if (alive) setIsProject(a.length > 0); });
     return () => { alive = false; };
   }, [wsCwd]);
   const launchable = isProject && !daemonRuns.length && !paneRuns.length;
@@ -648,7 +697,7 @@ export function Status() {
 
   if (!daemon && !pane) {
     return launchable ? (
-      <DevicePicker cwd={wsCwd} onPick={(d) => { void store.start(wsCwd, d.id, d.name); }}>
+      <DevicePicker root={wsCwd} onPick={(app, d) => { void store.start(app, d.id, d.name); }}>
         <span className="grid h-6 w-6 place-items-center rounded text-text-secondary transition-colors hover:bg-white/10 hover:text-text-primary">
           <Play size={12} />
         </span>
@@ -703,11 +752,11 @@ export const panelIcon = "Zap";
  * same tick the run button appears on, so the two agree.
  */
 export const panelWhen = () =>
-  store.getRuns().length > 0 || projectCache.get(currentCwd()) === true;
+  runsHere(store.getRuns(), getLayout()).length > 0 || (appsCache.get(currentCwd())?.length ?? 0) > 0;
 
 /** Palette entries, so the buttons are reachable without the mouse. */
 export function commands() {
-  const first = () => store.getRuns().find((r) => r.status === "running");
+  const first = () => runsHere(store.getRuns(), getLayout()).find((r) => r.status === "running");
   return [
     { id: "reload", title: "Flutter: Hot reload", run: () => { const r = first(); if (r) store.reload(r.id); } },
     { id: "restart", title: "Flutter: Hot restart", run: () => { const r = first(); if (r) store.restart(r.id); } },

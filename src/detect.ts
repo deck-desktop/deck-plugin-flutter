@@ -92,3 +92,56 @@ export function parseDevices(stdout: string): Device[] {
     }];
   });
 }
+
+/**
+ * Whether a pubspec.yaml is a Flutter project's rather than a pure Dart package's — both have
+ * one, and only the first can be run on a device.
+ */
+export function isFlutterPubspec(yaml: string): boolean {
+  return /^\s*flutter\s*:/m.test(yaml) || /sdk:\s*flutter/m.test(yaml);
+}
+
+/**
+ * Folders never worth looking inside for another app.
+ *
+ * Not only for speed. `build/` and the platform folders hold COPIES of plugin pubspecs
+ * (ios/.symlinks, the generated plugin registrants), so descending into them would offer
+ * every dependency as an app to run.
+ */
+const SKIP_DIRS = new Set([
+  "build", "node_modules", "target", "dist",
+  "android", "ios", "macos", "linux", "windows", "Pods",
+]);
+
+/** Whether the app search should look inside a folder of this name. Hidden folders never. */
+export function shouldDescend(name: string): boolean {
+  return !name.startsWith(".") && !SKIP_DIRS.has(name);
+}
+
+/**
+ * Which workspace a directory belongs to: the one whose folder contains it, the deepest when
+ * workspaces nest. Null when none does.
+ *
+ * Runs are attributed this way rather than by recording the workspace that started them,
+ * because an agent starts runs over MCP with only a directory to go on.
+ */
+export function ownerWorkspace(
+  workspaces: readonly { id: string; cwd: string }[], dir: string,
+): string | null {
+  const f = norm(dir);
+  let best: { id: string; len: number } | null = null;
+  for (const w of workspaces) {
+    const c = norm(w.cwd);
+    if (!c || (f !== c && !f.startsWith(c + "/"))) continue;
+    if (!best || c.length > best.len) best = { id: w.id, len: c.length };
+  }
+  return best?.id ?? null;
+}
+
+/** An app's name in the picker: its path under the workspace, or the folder name at the root. */
+export function appLabel(root: string, app: string): string {
+  const r = norm(root);
+  const a = app.replace(/\\/g, "/").replace(/\/+$/, "");
+  if (norm(a) === r) return a.split("/").pop() || a;
+  return norm(a).startsWith(r + "/") ? a.slice(r.length + 1) : a;
+}
