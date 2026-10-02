@@ -17,7 +17,7 @@
 // do, and the footer buttons should work for it.
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
-  Zap, RotateCw, Square, Play, Smartphone, Monitor, Globe, Loader2, X, Copy, Trash2, WrapText, Clock,
+  Zap, RotateCw, Square, Play, Smartphone, Monitor, Globe, X, Copy, Trash2, WrapText, Clock,
 } from "lucide-react";
 import { configRead, exec, fsList, fsRead, type ExecOut } from "../shim/bridge.js";
 import { termWrite, getLayout, useLayout, type Layout } from "../shim/terminals.js";
