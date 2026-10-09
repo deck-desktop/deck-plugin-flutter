@@ -15,9 +15,9 @@
 //
 // The second is not a fallback for the first. Typing `flutter run` in a pane is a normal thing to
 // do, and the footer buttons should work for it.
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { memo, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
-  Zap, RotateCw, Square, Play, Smartphone, Monitor, Globe, X, Copy, Trash2, WrapText, Clock,
+  Zap, RotateCw, Square, Play, Smartphone, Monitor, Globe, X, Copy, Trash2, WrapText, Clock, ScrollText, ArrowDownUp,
 } from "lucide-react";
 import { configRead, exec, fsList, fsRead, type ExecOut } from "../shim/bridge.js";
 import { termWrite, getLayout, useLayout, type Layout } from "../shim/terminals.js";
@@ -29,6 +29,7 @@ import { ContextMenu, type MenuEntry } from "../shim/ui.js";
 import { parseStackFrame, frameFile } from "./daemon.js";
 import * as store from "./store.js";
 import { matcher, regexSyntax, validRegex } from "./filter.js";
+import { NetworkView } from "./network.js";
 
 /** How often to re-read which panes are running an app. Matches Deck's sweep interval. */
 const POLL_MS = 10_000;
@@ -191,10 +192,11 @@ function usePaneRuns() {
  * a reload-on-save that only works while you are looking at the Flutter tab is worse than none.
  */
 let saveWired = false;
+let onSaved: ((e: Event) => void) | undefined;
 function wireSaveReload() {
   if (saveWired) return;
   saveWired = true;
-  window.addEventListener("deck-file-saved", (e) => {
+  window.addEventListener("deck-file-saved", onSaved = (e) => {
     const path = (e as CustomEvent<{ path: string }>).detail?.path;
     if (!path || !reloadOnSave) return;
 
@@ -327,7 +329,9 @@ function sameHead(l: store.LogLine, prev?: store.LogLine): boolean {
  * Only a frame in the project's OWN code is a link. `dart:ui` and the pub cache are not resolvable
  * from here, and a link that opens nothing is worse than plain text.
  */
-function LogText({ line, cwd, pkg }: { line: store.LogLine; cwd: string; pkg: string }) {
+// Memoised: a line never changes once logged, so a re-render of the log (ten a second while a run
+// is chatty) re-parses only the new lines' stack frames, not all 5000.
+const LogText = memo(function LogText({ line, cwd, pkg }: { line: store.LogLine; cwd: string; pkg: string }) {
   const f = parseStackFrame(line.text);
   if (!f) return <span className={`min-w-0 flex-1 ${LOG_COLOR[line.kind]}`}>{line.text}</span>;
 
@@ -352,7 +356,7 @@ function LogText({ line, cwd, pkg }: { line: store.LogLine; cwd: string; pkg: st
       )}
     </>
   );
-}
+});
 
 /** Colour per log kind. Mirrors what the terminal wrapper used, so the output reads the same. */
 const LOG_COLOR: Record<store.LogLine["kind"], string> = {
@@ -383,7 +387,7 @@ const LOG_COLOR: Record<store.LogLine["kind"], string> = {
  * wins, and the other picks it up on its next mount. Not worth a subscription.
  */
 const PREFS_KEY = "deck.flutter.panel";
-type Prefs = { selected: string | null; q: string; wrap: boolean; clock: "app" | "deck" | "off" };
+type Prefs = { selected: string | null; q: string; wrap: boolean; clock: "app" | "deck" | "off"; view: "logs" | "network" };
 const prefs: Partial<Prefs> = (() => {
   try { return JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}") as Partial<Prefs>; }
   catch { return {}; }
@@ -411,6 +415,8 @@ export function Panel() {
    * "app" falls back to Deck's clock rather than leaving a gap.
    */
   const [clock, setClock] = useState<"app" | "deck" | "off">(prefs.clock ?? "app");
+  /** The log, or the app's HTTP calls (network.tsx). */
+  const [view, setView] = useState<"logs" | "network">(prefs.view ?? "logs");
   /** The running project's package name, for resolving `package:` frames to files on disk. */
   const [pkg, setPkg] = useState("");
   const wsCwd = layout?.workspaces.find((w) => w.id === layout.activeWs)?.cwd ?? "";
@@ -434,9 +440,9 @@ export function Panel() {
   // Remember the view. Assigned into the module object too, so a second Panel mounting later in
   // this session starts from these rather than from whatever was on disk at startup.
   useEffect(() => {
-    Object.assign(prefs, { selected, q, wrap, clock });
+    Object.assign(prefs, { selected, q, wrap, clock, view });
     try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch { /* quota / private mode */ }
-  }, [selected, q, wrap, clock]);
+  }, [selected, q, wrap, clock, view]);
 
   const lines = active?.log ?? [];
   // Matched against the logger name too, so `/^AppLog$/` narrows to one logger's output.
@@ -479,6 +485,18 @@ export function Panel() {
     }).join("\n");
     void navigator.clipboard.writeText(text).catch(() => {});
   };
+
+  // Logs or Network: first in the filter row of whichever is showing.
+  const viewSwitch = (
+    <div className="flex shrink-0 overflow-hidden rounded border border-subtle text-[11px]">
+      {(["logs", "network"] as const).map((v) => (
+        <button key={v} onClick={() => setView(v)} title={v === "logs" ? "Logs" : "Network calls"}
+          className={`grid h-6 w-7 place-items-center ${view === v ? "bg-white/10 text-text-primary" : "text-text-muted hover:text-text-primary"}`}>
+          {v === "logs" ? <ScrollText size={13} /> : <ArrowDownUp size={13} />}
+        </button>
+      ))}
+    </div>
+  );
 
   if (!runs.length) {
     return (
@@ -568,8 +586,10 @@ export function Panel() {
         )}
       </div>
 
+      {view === "network" && active ? <NetworkView key={active.id} run={active} leading={viewSwitch} /> : <>
       {/* Filter and log actions. */}
       <div className="flex items-center gap-1.5 border-b border-subtle px-2 py-1">
+        {viewSwitch}
         <div className="relative flex items-center">
           <input
             value={q}
@@ -663,6 +683,7 @@ export function Panel() {
           </div>
         )}
       </div>
+      </>}
     </div>
   );
 }
@@ -774,3 +795,10 @@ export function commands() {
  * against a running app rather than checking on one.
  */
 export const PaneView = Panel;
+
+/** Called by Deck before a reload re-imports this plugin: the old copy's MCP listener and its
+ *  reload-on-save handler go, or every save would hot-reload once per copy. */
+export function dispose() {
+  store.dispose();
+  if (onSaved) window.removeEventListener("deck-file-saved", onSaved);
+}
