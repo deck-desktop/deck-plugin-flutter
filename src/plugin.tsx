@@ -378,8 +378,8 @@ const LOG_COLOR: Record<store.LogLine["kind"], string> = {
  * the runs it is showing live on in the store — so without this every one of these resets while
  * the thing being looked at is still running.
  *
- * localStorage rather than the synced config, for the reason `src/core/httpsession.ts` gives:
- * this is per-machine view state and has no business reaching the phone or the VPS. A stale
+ * localStorage rather than a config file, for the reason `src/core/httpsession.ts` gives:
+ * this is per-machine view state and has no business in a backup. A stale
  * `selected` after a restart is harmless — the render already falls back to `runs[0]`.
  *
  * ponytail: one key, one object, read once at module scope. Two Panels can be mounted at once
