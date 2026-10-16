@@ -130,7 +130,7 @@ function publishState() {
         })),
       })),
     };
-    void configWrite(STATE_KEY, JSON.stringify(payload)).catch(() => {});
+    void configWrite(STATE_KEY, JSON.stringify(payload)).catch((e) => console.warn("[flutter] run state save failed", e));
   }, 500);
 }
 
@@ -166,7 +166,7 @@ function publishTargets() {
 
 // A fresh webview has no runs, and the file still holds the last session's. Clearing it at module
 // scope stops an agent reporting an app that died with the previous window.
-void configWrite(STATE_KEY, JSON.stringify({ runs: [] })).catch(() => {});
+void configWrite(STATE_KEY, JSON.stringify({ runs: [] })).catch((e) => console.warn("[flutter] run state save failed", e));
 
 export const subscribe = (fn: () => void) => { subs.add(fn); return () => { subs.delete(fn); } };
 export const getRuns = () => snapshot;
@@ -468,7 +468,7 @@ export function clearNet(id: string) {
 }
 
 /** Send a daemon command, if the app has reported its id yet. */
-const send = (run: Run, frame: string) => procWrite(run.id, frame).catch(() => {});
+const send = (run: Run, frame: string) => procWrite(run.id, frame).catch((e) => console.warn("[flutter] daemon command failed", e));
 
 export function reload(id: string) {
   const run = runs.get(id);
@@ -506,7 +506,7 @@ export function stop(id: string) {
     void send(run, stopCommand(++cmdSeq, run.appId));
     setTimeout(() => { if (runs.get(id)?.status === "stopping") void procKill(id).catch(() => {}); }, 4000);
   } else {
-    void procKill(id).catch(() => {});
+    void procKill(id).catch((e) => console.warn("[flutter] stop failed", e));
   }
 }
 

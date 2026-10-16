@@ -52,7 +52,7 @@ function paneInfo(l: Layout | null, id: string): { cwd: string; wsId: string; la
 async function findPaneRuns(l: Layout | null): Promise<FlutterRun[]> {
   let procs: PaneProcs = {};
   try {
-    const t = await configRead("term-procs");
+    const t = await configRead("state/term-procs");
     procs = t.trim() ? (JSON.parse(t) as PaneProcs) : {};
   } catch { return []; }
   return Object.entries(procs)
@@ -209,7 +209,7 @@ function wireSaveReload() {
     // Otherwise a pane run, driven by the keypress.
     void findPaneRuns(getLayout()).then((rs) => {
       const run = runForFile(rs, path);
-      if (run) void termWrite(run.paneId, "r").catch(() => {});
+      if (run) void termWrite(run.paneId, "r").catch((e) => console.warn("[flutter] hot reload failed", e));
     });
   });
 }
@@ -224,7 +224,7 @@ let reloadOnSave = true;
 const RELOAD_KEY = "plugin-flutter";
 void configRead(RELOAD_KEY)
   .then((t) => { if (t.trim()) reloadOnSave = JSON.parse(t).reloadOnSave !== false; })
-  .catch(() => {});
+  .catch((e) => console.warn("[flutter] settings load failed", e));
 
 wireSaveReload();
 
@@ -734,7 +734,7 @@ export function Status() {
       else if (kind === "restart") store.restart(daemon.id);
       else store.stop(daemon.id);
     } else if (pane) {
-      void termWrite(pane.paneId, kind === "reload" ? "r" : kind === "restart" ? "R" : "q").catch(() => {});
+      void termWrite(pane.paneId, kind === "reload" ? "r" : kind === "restart" ? "R" : "q").catch((e) => console.warn(`[flutter] ${kind} failed`, e));
     }
   };
 

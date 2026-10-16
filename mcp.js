@@ -33,7 +33,7 @@ function register(server, deck) {
   const { z, ok, readJson, deckApi, apiErr } = deck;
   const pluginRuns = () => readJson("plugin-flutter-runs", { runs: [] }).runs ?? [];
   async function paneRuns() {
-    const procs = readJson("term-procs", {});
+    const procs = readJson("state/term-procs", {});
     const ids = Object.entries(procs).filter(([, rows]) => rows.some(isFlutterRun)).map(([id]) => id);
     if (!ids.length) return [];
     let panes = [];

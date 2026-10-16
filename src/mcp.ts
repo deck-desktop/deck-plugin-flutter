@@ -50,7 +50,7 @@ export function register(server: McpServer, deck: DeckMcp) {
    * makes a reload go to the wrong place.
    */
   async function paneRuns(): Promise<AnyRun[]> {
-    const procs = readJson<PaneProcs>("term-procs", {});
+    const procs = readJson<PaneProcs>("state/term-procs", {});
     const ids = Object.entries(procs).filter(([, rows]) => rows.some(isFlutterRun)).map(([id]) => id);
     if (!ids.length) return [];
     // The pane list carries the cwd and label, which term-procs does not.
