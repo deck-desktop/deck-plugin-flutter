@@ -1,4 +1,4 @@
-// plugins/flutter/src/detect.ts
+// src/detect.ts
 function isFlutterRun(p) {
   if (p.name.toLowerCase() !== "dart.exe") return false;
   const c = p.cmd.toLowerCase();
@@ -28,7 +28,7 @@ function parseDevices(stdout) {
   });
 }
 
-// plugins/flutter/src/mcp.ts
+// src/mcp.ts
 function register(server, deck) {
   const { z, ok, readJson, deckApi, apiErr } = deck;
   const pluginRuns = () => readJson("plugin-flutter-runs", { runs: [] }).runs ?? [];
