@@ -151,9 +151,16 @@ assert.equal(ev('[{"event":"app.log","params":{"log":"boom","error":true}}]').er
 assert.deepEqual(ev('[{"event":"app.progress","params":{"message":"Building…","finished":false}}]'),
   { kind: "progress", message: "Building…", finished: false });
 
-// Responses to our own commands carry an id and no event name. Showing them would print raw
-// JSON at the user on every hot reload.
-assert.equal(ev('[{"id":"2","result":{"code":0}}]'), null);
+// Responses to our own commands carry an id and no event name. They are a reply, never a log
+// line (which would print raw JSON at the user on every hot reload), and a reload's reply is how
+// its end is known: the notification comes down on it.
+assert.deepEqual(ev('[{"id":"2","result":{"code":0,"message":"Reloaded 3 of 512 libraries in 210ms."}}]'),
+  { kind: "reply", id: "2", ok: true, message: "Reloaded 3 of 512 libraries in 210ms." });
+assert.deepEqual(ev('[{"id":"3","result":{"code":1,"message":"Reload rejected: a const changed."}}]'),
+  { kind: "reply", id: "3", ok: false, message: "Reload rejected: a const changed." }, "a non-zero code is a failure");
+assert.deepEqual(ev('[{"id":"4","error":"app not found"}]'),
+  { kind: "reply", id: "4", ok: false, message: "app not found" }, "an error answer is a failure");
+assert.equal(ev('[{"id":5,"result":{}}]').id, "5", "the id is matched as a string, as it was sent");
 assert.equal(ev('[{"event":"daemon.connected","params":{"version":"0.6.1"}}]'), null,
   "daemon handshake is noise");
 
@@ -176,6 +183,17 @@ assert.equal(sent.params.fullRestart, false, "hot reload keeps state; fullRestar
 assert.equal(JSON.parse(p.restartCommand(3, "x"))[0].params.fullRestart, true);
 assert.equal(JSON.parse(p.stopCommand(4, "x"))[0].method, "app.stop");
 assert.equal(JSON.parse(reload)[0].id, "2", "the id is a string — the daemon echoes it back");
+
+// ---- how a run's end is reported ---------------------------------------------------------------
+// A stop the user asked for says nothing, whatever the code: a killed process exits non-zero, and a
+// card calling that a crash would fire on every Stop.
+assert.equal(p.exitNotice(true, 0, true), null);
+assert.equal(p.exitNotice(true, 1, true), null, "a stop that ended in a kill is still the user's stop");
+assert.deepEqual(p.exitNotice(false, 0, true), { kind: "activity", verb: "exited" },
+  "a clean exit nobody asked for is news, not a failure");
+assert.deepEqual(p.exitNotice(false, 1, true), { kind: "error", verb: "crashed" });
+assert.deepEqual(p.exitNotice(false, 1, false), { kind: "error", verb: "could not start" },
+  "an app that never reached the device (a build error) did not crash");
 
 // ---- the Logging stream ------------------------------------------------------------------------
 const record = (logger, message, level) => JSON.stringify({

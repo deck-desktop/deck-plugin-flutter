@@ -9,10 +9,11 @@
 // Service socket, the log buffer, and the commands. The UI reads and calls; it holds nothing.
 import { procStream, procWrite, procKill, configWrite, setDebugTargets } from "../shim/bridge.js";
 import { listen } from "@tauri-apps/api/event";
+import { notify, dismissNotification } from "../shim/ui.js";
 import {
   parseLine, reloadCommand, restartCommand, stopCommand,
   LOGGING_SUBSCRIBE, EXTENSION_SUBSCRIBE,
-  parseLogRecord, parseFlutterError, levelOf, type DaemonEvent,
+  parseLogRecord, parseFlutterError, levelOf, exitNotice, type DaemonEvent,
 } from "./daemon.js";
 import { parseProfile, mergeCalls, toCall, type NetCall } from "./net.js";
 
@@ -45,6 +46,12 @@ export interface Run {
   /** Assigned by the daemon once the app starts; no command can be sent before it arrives. */
   appId: string;
   status: "starting" | "running" | "reloading" | "stopping" | "ended";
+  /**
+   * Set by `stop`, so its end is not reported as the app dying. Not read off `status`: the daemon's
+   * `app.stop` turns that to "ended" before the process exits. On the run itself, so it survives
+   * the handoff to the next copy of the plugin along with the run.
+   */
+  stopRequested?: boolean;
   log: LogLine[];
   /** Live VM Service socket, when the Logging stream is attached. */
   ws?: WebSocket;
@@ -211,6 +218,7 @@ function handle(run: Run, evt: DaemonEvent) {
       break;
     case "stopped":
       run.status = "ended";
+      settleRun(run.id);
       break;
     case "progress":
       // Only the start of a step; the "finished" half would double every line.
@@ -224,6 +232,9 @@ function handle(run: Run, evt: DaemonEvent) {
       break;
     case "raw":
       append(run, evt.text, "raw");
+      break;
+    case "reply":
+      settle(evt.id, evt.ok, evt.message);
       break;
   }
   publish();
@@ -325,15 +336,24 @@ function follow(run: Run, exit: Exit) {
       if (disposed) return;
       exits.delete(run.id);
       run.status = "ended";
+      settleRun(run.id);
       append(run, r.cancelled ? "stopped" : `exited with code ${r.code}`, "deck");
       publish();
+      // Said once per run: a copy that handed its runs on returned above, and the copy holding the
+      // run now is the one that reports it.
+      const n = exitNotice(r.cancelled || !!run.stopRequested, r.code, !!run.wsUri);
+      if (n) notify({ kind: n.kind, source: "Flutter", key: exitKey(run),
+        title: `${appDir(run)} ${n.verb}`, body: `Exited with code ${r.code} on ${run.deviceName}` });
     },
     (e) => {
       if (disposed) return;
       exits.delete(run.id);
       run.status = "ended";
+      settleRun(run.id);
       append(run, `could not start: ${String(e)}`, "error");
       publish();
+      if (!run.stopRequested) notify({ kind: "error", source: "Flutter", key: exitKey(run),
+        title: `${appDir(run)} could not start`, body: `${String(e)} (${run.deviceName})` });
     },
   );
 }
@@ -470,25 +490,55 @@ export function clearNet(id: string) {
 /** Send a daemon command, if the app has reported its id yet. */
 const send = (run: Run, frame: string) => procWrite(run.id, frame).catch((e) => console.warn("[flutter] daemon command failed", e));
 
-export function reload(id: string) {
+/**
+ * The reloads and restarts sent and not answered yet, by command id. The daemon answers each once
+ * it is done, so that answer is what ends "reloading" and takes the notification down.
+ */
+const inFlight = new Map<string, { runId: string; full: boolean; timer: ReturnType<typeof setTimeout> }>();
+/** Long enough for a restart of a big app; a reply that never comes must not leave the card up. */
+const RELOAD_GIVE_UP_MS = 60_000;
+const appDir = (run: Run) => run.cwd.split(/[\\/]/).filter(Boolean).pop() ?? "app";
+const appName = (run: Run) => `${appDir(run)} on ${run.deviceName}`;
+const noticeKey = (run: Run) => `reload:${run.id}`;
+/** A run's end, when it ended without being asked to (see `follow`). */
+const exitKey = (run: Run) => `exit:${run.id}`;
+
+function sendReload(id: string, full: boolean) {
   const run = runs.get(id);
   if (!run?.appId) return;
   run.status = "reloading";
   publish();
-  void send(run, reloadCommand(++cmdSeq, run.appId)).then(() => {
-    if (run.status === "reloading") { run.status = "running"; publish(); }
-  });
+  const cmd = ++cmdSeq;
+  // A card while it runs: in the corner only, never a row in the bell for every save.
+  notify({ source: "Flutter", key: noticeKey(run), transient: true, sticky: true,
+    title: full ? "Hot restarting…" : "Hot reloading…", body: appName(run) });
+  const timer = setTimeout(() => settle(String(cmd), true, ""), RELOAD_GIVE_UP_MS);
+  inFlight.set(String(cmd), { runId: run.id, full, timer });
+  void send(run, full ? restartCommand(cmd, run.appId) : reloadCommand(cmd, run.appId));
 }
 
-export function restart(id: string) {
-  const run = runs.get(id);
-  if (!run?.appId) return;
-  run.status = "reloading";
-  publish();
-  void send(run, restartCommand(++cmdSeq, run.appId)).then(() => {
-    if (run.status === "reloading") { run.status = "running"; publish(); }
-  });
+/** A reload's answer (or the wait for one given up on): back to running, the card goes, and a
+ *  failure stays in the bell with what the daemon said. */
+function settle(cmd: string, ok: boolean, message: string) {
+  const f = inFlight.get(cmd);
+  if (!f) return;
+  inFlight.delete(cmd);
+  clearTimeout(f.timer);
+  const run = runs.get(f.runId);
+  if (!run) return;
+  if (run.status === "reloading") { run.status = "running"; publish(); }
+  dismissNotification("Flutter", noticeKey(run));
+  if (!ok) notify({ source: "Flutter", key: noticeKey(run), sticky: true,
+    title: f.full ? "Hot restart failed" : "Hot reload failed", body: message || appName(run) });
 }
+
+/** The app stopped or exited: whatever it was reloading will not answer. */
+function settleRun(runId: string) {
+  for (const [cmd, f] of inFlight) if (f.runId === runId) settle(cmd, true, "");
+}
+
+export const reload = (id: string) => sendReload(id, false);
+export const restart = (id: string) => sendReload(id, true);
 
 /**
  * Stop an app.
@@ -501,6 +551,7 @@ export function stop(id: string) {
   const run = runs.get(id);
   if (!run) return;
   run.status = "stopping";
+  run.stopRequested = true;
   publish();
   if (run.appId) {
     void send(run, stopCommand(++cmdSeq, run.appId));
@@ -601,9 +652,11 @@ if (handed) {
   publish();
 }
 
-/** Forget an ended run, closing its socket. */
+/** Forget an ended run, closing its socket. Its exit card goes with it, as on a restart, which
+ *  starts a new run and forgets the old one. */
 export function dismiss(id: string) {
   const run = runs.get(id);
+  if (run) dismissNotification("Flutter", exitKey(run));
   run?.ws?.close();
   runs.delete(id);
   netState.delete(id);

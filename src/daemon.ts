@@ -27,6 +27,8 @@ export type DaemonEvent =
   /** print / debugPrint, forwarded by flutter itself. */
   | { kind: "log"; text: string; error: boolean }
   | { kind: "devTools"; uri: string }
+  /** The daemon's answer to a command we sent, by its id: for a reload, sent once it is done. */
+  | { kind: "reply"; id: string; ok: boolean; message: string }
   /** Anything not recognised, including plain non-JSON output like "Launching lib\main.dart". */
   | { kind: "raw"; text: string };
 
@@ -71,8 +73,9 @@ export function isErrorText(text: string): boolean {
  * Non-JSON lines are `raw` rather than dropped: flutter prints a few ("Launching…", compiler
  * errors) and losing them would leave the log with gaps exactly when something went wrong.
  *
- * Returns null only for lines that are genuinely nothing to show — daemon handshakes and the
- * responses to our own commands, which would otherwise print raw JSON at the user.
+ * Returns null only for lines that are genuinely nothing to show, such as daemon handshakes. The
+ * responses to our own commands come back as `reply`, which is never printed: a reload is
+ * finished when its reply arrives, and the reply says whether it worked.
  */
 /** Drop the daemon's "flutter: " prefix from app output. */
 export const stripPrefix = (text: string) => text.replace(/^flutter:\s?/, "");
@@ -99,8 +102,18 @@ export function parseLine({ stream, line }: Line): DaemonEvent | null {
   if (!Array.isArray(msg) || !msg.length) return { kind: "raw", text };
 
   const evt = msg[0] as Record<string, unknown>;
-  // A response to something we sent (it carries our id, not an event name). Nothing to show.
-  if (typeof evt.event !== "string") return null;
+  // A response to something we sent: it carries our id, not an event name. An app.restart answers
+  // { code, message } when it ran (code 0 when it worked), or an error when it could not.
+  if (typeof evt.event !== "string") {
+    if (evt.id === undefined) return null;
+    const res = evt.result as { code?: number; message?: string } | undefined;
+    const err = evt.error;
+    const ok = err === undefined && (res?.code ?? 0) === 0;
+    const message = typeof err === "string" ? err
+      : typeof res?.message === "string" ? res.message
+      : err ? JSON.stringify(err) : "";
+    return { kind: "reply", id: String(evt.id), ok, message };
+  }
   const p = (evt.params ?? {}) as Record<string, unknown>;
   const str = (v: unknown) => (typeof v === "string" ? v : "");
 
@@ -127,8 +140,8 @@ export function parseLine({ stream, line }: Line): DaemonEvent | null {
  * One JSON array per line is the framing the daemon expects; the trailing newline is part of the
  * message rather than something the caller adds, since `procWrite` appends nothing.
  *
- * `id` only has to be unique within a session — the daemon echoes it back on the response, and
- * nothing here waits for one.
+ * `id` only has to be unique within a session — the daemon echoes it back on the response, which
+ * is how a reload's end is told apart (see `reply`).
  */
 export const command = (id: number, method: string, params: Record<string, unknown>) =>
   `${JSON.stringify([{ id: String(id), method, params }])}\n`;
@@ -367,4 +380,21 @@ export function parseFlutterError(frame: string): string {
   // still better than silence.
   const desc = typeof data.description === "string" ? data.description : "";
   return desc.trim();
+}
+
+/**
+ * How a run's process ending is reported, or null when it needs no word: the user stopped it, so
+ * the end is what they asked for.
+ *
+ * Decided by the exit code alone, since `app.stop` arrives both when the user stops an app and when
+ * it dies on the device, and `flutter run` exits after it either way. A clean exit nobody asked for
+ * (the app closed on the phone, `exit(0)`) is news, not a failure; anything else is a failure, and
+ * one before the app ever reached the device (no VM Service yet, so most often a build error) is
+ * "could not start" rather than "crashed".
+ */
+export function exitNotice(userStopped: boolean, code: number, reachedDevice: boolean):
+  { kind: "activity" | "error"; verb: string } | null {
+  if (userStopped) return null;
+  if (code === 0) return { kind: "activity", verb: "exited" };
+  return { kind: "error", verb: reachedDevice ? "crashed" : "could not start" };
 }
