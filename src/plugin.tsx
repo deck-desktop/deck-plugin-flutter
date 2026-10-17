@@ -25,7 +25,7 @@ import {
   isFlutterRun, runForFile, parseDevices, isFlutterPubspec, shouldDescend, ownerWorkspace, appLabel,
   type Device, type FlutterRun, type PaneProcs,
 } from "./detect.js";
-import { ContextMenu, type MenuEntry } from "../shim/ui.js";
+import { ContextMenu, StatusItem, type MenuEntry } from "../shim/ui.js";
 import { parseStackFrame, frameFile } from "./daemon.js";
 import * as store from "./store.js";
 import { matcher, regexSyntax, validRegex } from "./filter.js";
@@ -715,12 +715,15 @@ export function Status() {
 
   const daemon = daemonRuns[0];
   const pane = paneRuns[0];
+  // StatusItem's height, so the buttons line up with the readout beside them.
+  const btn = "grid h-[22px] w-[22px] place-items-center rounded-[4px] transition-colors";
 
   if (!daemon && !pane) {
     return launchable ? (
       <DevicePicker root={wsCwd} onPick={(app, d) => { void store.start(app, d.id, d.name); }}>
-        <span className="grid h-6 w-6 place-items-center rounded text-text-secondary transition-colors hover:bg-white/10 hover:text-text-primary">
-          <Play size={12} />
+        {/* A span, not a StatusItem: the picker's own button is the clickable part. */}
+        <span className={btn + " text-text-secondary hover:bg-white/[0.06] hover:text-text-primary"}>
+          <Play size={13} />
         </span>
       </DevicePicker>
     ) : null;
@@ -738,23 +741,35 @@ export function Status() {
     }
   };
 
-  const btn = "grid h-6 w-6 place-items-center rounded transition-colors";
   const label = daemon ? `${daemon.deviceName} · ${daemon.status}` : pane?.label ?? "flutter run";
+  // Green once it is up, amber while a start or reload is under way: the moment not to save again.
+  const color = !daemon ? "var(--text-secondary)"
+    : daemon.status === "running" ? "#4ad08f"
+    : daemon.status === "stopping" ? "var(--text-muted)"
+    : "#f5b14c";
   return (
-    <div className="flex items-center gap-0.5" title={label}>
+    <div className="flex items-center">
+      <StatusItem
+        icon={<Smartphone />}
+        color={color}
+        label={daemon ? daemon.deviceName : pane?.label ?? "flutter run"}
+        detail={daemon && daemon.status !== "running" ? daemon.status : undefined}
+        title={`${label} — show its log`}
+        onClick={() => window.dispatchEvent(new CustomEvent("deck-footer-tab", { detail: "plugin:flutter" }))}
+      />
       <button onClick={() => act("reload")} title="Hot reload (r)"
-        className={btn + " text-text-secondary hover:bg-white/10 hover:text-text-primary"}
+        className={btn + " text-text-secondary hover:bg-white/[0.06] hover:text-text-primary"}
         style={busy === "reload" ? { color: "var(--accent)" } : undefined}>
-        <Zap size={12} />
+        <Zap size={13} />
       </button>
       <button onClick={() => act("restart")} title="Hot restart (R)"
-        className={btn + " text-text-secondary hover:bg-white/10 hover:text-text-primary"}
+        className={btn + " text-text-secondary hover:bg-white/[0.06] hover:text-text-primary"}
         style={busy === "restart" ? { color: "var(--accent)" } : undefined}>
-        <RotateCw size={12} />
+        <RotateCw size={13} />
       </button>
       <button onClick={() => act("stop")} title="Stop the app (q)"
-        className={btn + " text-text-secondary hover:bg-white/10 hover:text-red-400"}>
-        <Square size={10} />
+        className={btn + " text-text-secondary hover:bg-white/[0.06] hover:text-red-400"}>
+        <Square size={11} />
       </button>
     </div>
   );
