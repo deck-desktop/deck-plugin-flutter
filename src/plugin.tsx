@@ -17,7 +17,7 @@
 // do, and the footer buttons should work for it.
 import { memo, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
-  Zap, RotateCw, Square, Play, Smartphone, Monitor, Globe, X, Copy, Trash2, WrapText, Clock, ScrollText, ArrowDownUp,
+  Zap, RotateCw, Square, Play, Smartphone, Monitor, Globe, X, Copy, Trash2, WrapText, Clock, ScrollText, ArrowDownUp, Search,
 } from "lucide-react";
 import { configRead, exec, fsList, fsRead, type ExecOut } from "../shim/bridge.js";
 import { termWrite, getLayout, useLayout, type Layout } from "../shim/terminals.js";
@@ -301,6 +301,14 @@ function DevicePicker({ root, onPick, children }: {
   );
 }
 
+/** The panel's toolbar buttons; a switched-on toggle adds `ON` as its style. */
+const toolBtn = "grid size-7 shrink-0 place-items-center rounded-lg text-text-muted transition-colors hover:bg-white/5 hover:text-text-primary";
+const ON = { background: "var(--accent-soft)", color: "var(--text-primary)" } as const;
+
+/** A run's state as a dot: green once it is up, amber while it starts or stops, muted once ended. */
+const runDot = (s: store.Run["status"]) =>
+  s === "running" ? "rgb(var(--tone-green-400))" : s === "ended" ? "var(--text-muted)" : "rgb(var(--tone-amber-400))";
+
 const time = (ts: number) =>
   new Date(ts).toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
@@ -488,10 +496,11 @@ export function Panel() {
 
   // Logs or Network: first in the filter row of whichever is showing.
   const viewSwitch = (
-    <div className="flex shrink-0 overflow-hidden rounded border border-subtle text-[11px]">
+    <div className="flex shrink-0 items-center gap-0.5 rounded-lg border border-subtle p-0.5" style={{ background: "var(--bg-elev)" }}>
       {(["logs", "network"] as const).map((v) => (
-        <button key={v} onClick={() => setView(v)} title={v === "logs" ? "Logs" : "Network calls"}
-          className={`grid h-6 w-7 place-items-center ${view === v ? "bg-white/10 text-text-primary" : "text-text-muted hover:text-text-primary"}`}>
+        <button key={v} onClick={() => setView(v)} title={v === "logs" ? "Logs" : "Network calls"} aria-pressed={view === v}
+          className={`grid size-6 place-items-center rounded-md transition-colors ${view === v ? "" : "text-text-muted hover:bg-white/5 hover:text-text-primary"}`}
+          style={view === v ? ON : undefined}>
           {v === "logs" ? <ScrollText size={13} /> : <ArrowDownUp size={13} />}
         </button>
       ))}
@@ -500,19 +509,25 @@ export function Panel() {
 
   if (!runs.length) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 text-text-muted">
-        <Zap size={28} className="opacity-40" />
-        <p className="text-sm">No app running.</p>
-        {launchable ? (
-          <DevicePicker root={wsCwd}
-            onPick={(app, d) => { void store.start(app, d.id, d.name).then(setSelected); }}>
-            <span className="flex items-center gap-1.5 rounded bg-white/10 px-3 py-1.5 text-xs text-text-primary hover:bg-white/15">
-              <Play size={12} /> Run on a device
-            </span>
-          </DevicePicker>
-        ) : (
-          <p className="text-xs">No Flutter app in this workspace.</p>
-        )}
+      <div className="flex h-full items-center justify-center px-6">
+        <div className="flex max-w-[420px] items-start gap-2.5 rounded-lg border border-subtle px-3.5 py-3.5 text-[12.5px] leading-relaxed text-text-muted"
+          style={{ background: "var(--bg-elev)" }}>
+          <Zap size={16} className="mt-0.5 shrink-0" />
+          {launchable ? (
+            <div className="flex flex-col items-start gap-3">
+              <span>No app running. Pick a device to run this workspace's app on it, with its log and hot reload here.</span>
+              <DevicePicker root={wsCwd}
+                onPick={(app, d) => { void store.start(app, d.id, d.name).then(setSelected); }}>
+                <span className="flex h-8 items-center gap-1.5 rounded-lg px-3 text-[12.5px] font-medium text-white transition hover:brightness-110"
+                  style={{ background: "var(--accent)" }}>
+                  <Play size={12} /> Run on a device
+                </span>
+              </DevicePicker>
+            </div>
+          ) : (
+            <span>No app running, and no Flutter app in this workspace. Open a workspace whose folder holds one (a pubspec.yaml and lib/main.dart) to run it from here.</span>
+          )}
+        </div>
       </div>
     );
   }
@@ -520,35 +535,35 @@ export function Panel() {
   return (
     <div className="flex h-full flex-col">
       {/* Run switcher + controls */}
-      <div className="flex items-center gap-1 border-b border-subtle px-2 py-1.5">
+      <div className="flex h-9 shrink-0 items-center gap-0.5 border-b border-subtle px-1.5">
         {runs.map((r) => {
           const Icon = deviceIcon(r.deviceId);
+          const on = r.id === active?.id;
           return (
+            // Raised like an open tab, not lit in the accent. Not a TabStrip: a run that is still
+            // going cannot be closed from its tab, only stopped.
             <button key={r.id} onClick={() => setSelected(r.id)}
-              className={`flex items-center gap-1.5 rounded px-2 py-1 text-[11px] ${
-                r.id === active?.id ? "bg-white/10 text-text-primary" : "text-text-muted hover:bg-white/5"}`}>
-              <Icon size={11} />
-              {r.deviceName}
-              <span className={r.status === "running" ? "text-emerald-400" : "text-text-muted"}>
-                {r.status === "running" ? "●" : r.status === "ended" ? "○" : "◐"}
-              </span>
+              className={`flex h-7 min-w-0 items-center gap-1.5 rounded-md px-2.5 text-[12px] transition-colors ${
+                on ? "text-text-primary" : "text-text-muted hover:bg-white/5 hover:text-text-primary"}`}
+              style={on ? { background: "var(--bg-elev)", boxShadow: "inset 0 0 0 1px var(--border-strong)" } : undefined}>
+              <Icon size={13} className="shrink-0" />
+              <span className="truncate">{r.deviceName}</span>
+              <span className="size-[7px] shrink-0 rounded-full" title={r.status} style={{ background: runDot(r.status) }} />
             </button>
           );
         })}
         <div className="flex-1" />
         {active && active.status !== "ended" && (
           <>
-            <button onClick={() => store.reload(active.id)} title="Hot reload"
-              className="grid h-6 w-6 place-items-center rounded text-text-secondary hover:bg-white/10 hover:text-text-primary">
-              <Zap size={12} />
+            <button onClick={() => store.reload(active.id)} title="Hot reload" className={toolBtn}>
+              <Zap size={14} />
             </button>
-            <button onClick={() => store.restart(active.id)} title="Hot restart"
-              className="grid h-6 w-6 place-items-center rounded text-text-secondary hover:bg-white/10 hover:text-text-primary">
-              <RotateCw size={12} />
+            <button onClick={() => store.restart(active.id)} title="Hot restart" className={toolBtn}>
+              <RotateCw size={14} />
             </button>
             <button onClick={() => store.stop(active.id)} title="Stop"
-              className="grid h-6 w-6 place-items-center rounded text-text-secondary hover:bg-white/10 hover:text-red-400">
-              <Square size={10} />
+              className="grid size-7 shrink-0 place-items-center rounded-lg text-text-muted transition-colors hover:bg-white/5 hover:text-red-400">
+              <Square size={12} />
             </button>
           </>
         )}
@@ -566,21 +581,19 @@ export function Panel() {
                 void store.start(active.cwd, active.deviceId, active.deviceName)
                   .then((id) => { store.dismiss(old); setSelected(id); });
               }}
-              title={`Run again on ${active.deviceName}`}
-              className="grid h-6 w-6 place-items-center rounded text-text-secondary hover:bg-white/10 hover:text-text-primary">
-              <RotateCw size={12} />
+              title={`Run again on ${active.deviceName}`} className={toolBtn}>
+              <RotateCw size={14} />
             </button>
-            <button onClick={() => store.dismiss(active.id)} title="Close this run"
-              className="grid h-6 w-6 place-items-center rounded text-text-secondary hover:bg-white/10 hover:text-text-primary">
-              <X size={12} />
+            <button onClick={() => store.dismiss(active.id)} title="Close this run" className={toolBtn}>
+              <X size={14} />
             </button>
           </>
         )}
         {launchable && (
           <DevicePicker root={wsCwd}
             onPick={(app, d) => { void store.start(app, d.id, d.name).then(setSelected); }}>
-            <span className="grid h-6 w-6 place-items-center rounded text-text-secondary hover:bg-white/10 hover:text-text-primary">
-              <Play size={12} />
+            <span className={toolBtn}>
+              <Play size={14} />
             </span>
           </DevicePicker>
         )}
@@ -588,15 +601,17 @@ export function Panel() {
 
       {view === "network" && active ? <NetworkView key={active.id} run={active} leading={viewSwitch} /> : <>
       {/* Filter and log actions. */}
-      <div className="flex items-center gap-1.5 border-b border-subtle px-2 py-1">
+      <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-subtle px-1.5">
         {viewSwitch}
-        <div className="relative flex items-center">
+        <div className="flex h-7 w-60 min-w-0 items-center gap-1.5 rounded-lg border border-subtle pl-2 pr-1 transition-colors focus-within:border-[var(--accent)]"
+          style={{ background: "var(--bg-elev)" }}>
+          <Search size={12} className="shrink-0 text-text-muted" />
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Filter logs…"
             spellCheck={false}
-            className="w-60 rounded border border-subtle bg-card py-0.5 pl-2 pr-8 font-mono text-[11px] text-text-primary outline-none placeholder:font-sans placeholder:text-text-muted focus:border-accent-soft"
+            className="min-w-0 flex-1 bg-transparent font-mono text-[11px] text-text-primary outline-none placeholder:font-sans placeholder:text-text-muted"
           />
           {/*
             The regex switch, as a button rather than a hint: the syntax is slashes around the
@@ -612,18 +627,20 @@ export function Panel() {
             title={regexSyntax(q)
               ? "Using a regular expression — click to go back to plain text"
               : "Match with a regular expression (wraps the text in /slashes/)"}
-            className="absolute right-1 rounded px-1 py-0.5 font-mono text-[10px] transition-colors hover:bg-white/10"
-            style={{ color: regexSyntax(q) ? "var(--accent)" : "var(--text-muted)" }}
+            aria-pressed={regexSyntax(q)}
+            className={`grid h-5 shrink-0 place-items-center rounded-md px-1 font-mono text-[10px] transition-colors ${
+              regexSyntax(q) ? "text-text-primary" : "text-text-muted hover:bg-white/5 hover:text-text-primary"}`}
+            style={regexSyntax(q) ? { background: "var(--accent-soft)", boxShadow: "inset 0 0 0 1px var(--accent)" } : undefined}
           >
             .*
           </button>
         </div>
-        <span className="text-[10px] text-text-muted">
+        <span className="shrink-0 text-[11px] text-text-muted">
           {shown.length}{shown.length !== lines.length && ` / ${lines.length}`} lines
         </span>
         {/* A pattern that cannot compile searches literally; saying so beats silently doing it. */}
         {regexSyntax(q) && !validRegex(q) && (
-          <span className="text-[10px] text-amber-400">incomplete pattern — matching literally</span>
+          <span className="truncate text-[11px] text-amber-400">Incomplete pattern, matching literally</span>
         )}
         <div className="ml-auto flex items-center gap-0.5">
           {/* Three states on one button rather than a menu: it is two bits of state, and the
@@ -633,23 +650,22 @@ export function Panel() {
             title={clock === "app" ? "Showing when the app logged each line — click for Deck's receive time"
               : clock === "deck" ? "Showing when Deck received each line — click to hide the column"
               : "Timestamps hidden — click to show when the app logged each line"}
-            className="rounded p-1.5 text-text-muted hover:bg-white/5 hover:text-text-primary"
-            style={clock !== "off" ? { color: clock === "deck" ? "var(--accent)" : "var(--text-primary)" } : undefined}>
-            <Clock size={12} />
+            aria-pressed={clock !== "off"}
+            // Deck's clock is the less usual choice, so it carries the ring as well.
+            className={toolBtn}
+            style={clock === "app" ? ON : clock === "deck" ? { ...ON, boxShadow: "inset 0 0 0 1px var(--accent)" } : undefined}>
+            <Clock size={13} />
           </button>
           <button onClick={() => setWrap((v) => !v)} title={wrap ? "Stop wrapping long lines" : "Wrap long lines"}
-            className="rounded p-1.5 text-text-muted hover:bg-white/5 hover:text-text-primary"
-            style={wrap ? { color: "var(--text-primary)" } : undefined}>
-            <WrapText size={12} />
+            aria-pressed={wrap} className={toolBtn} style={wrap ? ON : undefined}>
+            <WrapText size={13} />
           </button>
-          <button onClick={copyAll} title="Copy what is shown"
-            className="rounded p-1.5 text-text-muted hover:bg-white/5 hover:text-text-primary">
-            <Copy size={12} />
+          <button onClick={copyAll} title="Copy what is shown" className={toolBtn}>
+            <Copy size={13} />
           </button>
           {active && (
-            <button onClick={() => store.clearLog(active.id)} title="Clear the log"
-              className="rounded p-1.5 text-text-muted hover:bg-white/5 hover:text-text-primary">
-              <Trash2 size={12} />
+            <button onClick={() => store.clearLog(active.id)} title="Clear the log" className={toolBtn}>
+              <Trash2 size={13} />
             </button>
           )}
         </div>
@@ -678,8 +694,8 @@ export function Panel() {
           </div>
         ))}
         {!shown.length && (
-          <div className="px-1 py-3 text-text-muted">
-            {lines.length ? "Nothing matches this filter." : "Waiting for output…"}
+          <div className="px-1 py-3 font-sans text-[12px] text-text-muted">
+            {lines.length ? "Nothing matches this filter. Clear it to see every line." : "Waiting for output…"}
           </div>
         )}
       </div>
@@ -744,9 +760,9 @@ export function Status() {
   const label = daemon ? `${daemon.deviceName} · ${daemon.status}` : pane?.label ?? "flutter run";
   // Green once it is up, amber while a start or reload is under way: the moment not to save again.
   const color = !daemon ? "var(--text-secondary)"
-    : daemon.status === "running" ? "#4ad08f"
+    : daemon.status === "running" ? "rgb(var(--tone-green-400))"
     : daemon.status === "stopping" ? "var(--text-muted)"
-    : "#f5b14c";
+    : "rgb(var(--tone-amber-400))";
   return (
     <div className="flex items-center">
       <StatusItem

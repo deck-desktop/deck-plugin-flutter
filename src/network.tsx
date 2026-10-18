@@ -5,7 +5,7 @@
 // when it is selected, because the profile sends them as a list of byte values and most calls
 // are never opened.
 import { useEffect, useRef, useState } from "react";
-import { Copy, Trash2, X, Terminal } from "lucide-react";
+import { Copy, Trash2, X, Terminal, Search } from "lucide-react";
 import { useResize } from "../shim/ui.js";
 import { monaco } from "../shim/monaco.js";
 import * as store from "./store.js";
@@ -13,9 +13,14 @@ import { matcher } from "./filter.js";
 import { bodyText, curlOf, duration, type NetCall } from "./net.js";
 
 const statusColor = (c: NetCall) =>
-  c.error ? "#f87171"
+  c.error ? "rgb(var(--tone-red-400))"
     : c.status === undefined ? "var(--text-muted)"
-    : c.status >= 500 ? "#f87171" : c.status >= 400 ? "#fbbf24" : c.status >= 300 ? "#60a5fa" : "#34d399";
+    : c.status >= 500 ? "rgb(var(--tone-red-400))" : c.status >= 400 ? "rgb(var(--tone-amber-400))"
+    : c.status >= 300 ? "rgb(var(--tone-blue-400))" : "rgb(var(--tone-emerald-400))";
+
+/** An icon button in the toolbar, and a smaller one in the details header. */
+const toolBtn = "grid size-7 shrink-0 place-items-center rounded-lg text-text-muted transition-colors hover:bg-white/5 hover:text-text-primary";
+const headBtn = "grid size-6 shrink-0 place-items-center rounded-md text-text-muted transition-colors hover:bg-white/5 hover:text-text-primary";
 
 const size = (n: number) => (n < 0 ? "" : n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`);
 const ms = (c: NetCall) => { const d = duration(c); return d === undefined ? "…" : d < 1000 ? `${d} ms` : `${(d / 1000).toFixed(2)} s`; };
@@ -70,16 +75,19 @@ export function NetworkView({ run, leading }: { run: store.Run; leading?: React.
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-1.5 border-b border-subtle px-2 py-1">
+      <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-subtle px-1.5">
         {leading}
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter calls…" spellCheck={false}
-          className="w-60 rounded border border-subtle bg-card px-2 py-0.5 font-mono text-[11px] text-text-primary outline-none placeholder:font-sans placeholder:text-text-muted focus:border-accent-soft" />
-        <span className="text-[10px] text-text-muted">
+        <div className="flex h-7 w-60 min-w-0 items-center gap-1.5 rounded-lg border border-subtle pl-2 pr-1 transition-colors focus-within:border-[var(--accent)]"
+          style={{ background: "var(--bg-elev)" }}>
+          <Search size={12} className="shrink-0 text-text-muted" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter calls…" spellCheck={false}
+            className="min-w-0 flex-1 bg-transparent font-mono text-[11px] text-text-primary outline-none placeholder:font-sans placeholder:text-text-muted" />
+        </div>
+        <span className="shrink-0 text-[11px] text-text-muted">
           {shown.length}{shown.length !== calls.length && ` / ${calls.length}`} calls
         </span>
-        <button onClick={() => { store.clearNet(run.id); setPicked(null); }} title="Clear the calls"
-          className="ml-auto rounded p-1.5 text-text-muted hover:bg-white/5 hover:text-text-primary">
-          <Trash2 size={12} />
+        <button onClick={() => { store.clearNet(run.id); setPicked(null); }} title="Clear the calls" className={"ml-auto " + toolBtn}>
+          <Trash2 size={13} />
         </button>
       </div>
       <div ref={splitRef} className={`flex min-h-0 flex-1 ${narrow ? "flex-col" : ""}`}>
@@ -90,7 +98,8 @@ export function NetworkView({ run, leading }: { run: store.Run; leading?: React.
             try { const u = new URL(c.uri); path = u.pathname + u.search; host = u.host; } catch { /* not a URL: show it whole */ }
             return (
               <button key={keyOf(c)} onClick={() => setPicked(keyOf(c))} title={c.uri}
-                className={`flex w-full items-center gap-2 border-b border-white/5 px-2 py-1.5 text-left hover:bg-white/5 ${keyOf(c) === picked ? "bg-white/10" : ""}`}>
+                className={`flex w-full items-center gap-2 border-b border-white/5 px-2 py-1.5 text-left transition-colors ${keyOf(c) === picked ? "" : "hover:bg-white/5"}`}
+                style={keyOf(c) === picked ? { background: "var(--accent-soft)" } : undefined}>
                 <span className="w-12 shrink-0 font-semibold text-text-secondary">{c.method}</span>
                 <span className="w-9 shrink-0 tabular-nums" style={{ color: statusColor(c) }}>{c.error ? "ERR" : c.status ?? "…"}</span>
                 {/* The path is what tells calls apart; the host, the same for most of them, goes under it. */}
@@ -104,7 +113,7 @@ export function NetworkView({ run, leading }: { run: store.Run; leading?: React.
             );
           })}
           {!shown.length && (
-            <div className="px-3 py-3 font-sans text-text-muted">
+            <div className="px-3 py-3 font-sans text-[12px] text-text-muted">
               {calls.length ? "Nothing matches this filter."
                 : run.ws ? "No HTTP calls yet. Calls made through dart:io (package:http, dio) show here."
                 : "Waiting for the app's VM Service…"}
@@ -140,7 +149,7 @@ function CallDetail({ runId, call, below, size: px, onClose }: { runId: string; 
 
   const section = (title: string, body: React.ReactNode) => (
     <details open className="border-b border-subtle">
-      <summary className="cursor-pointer select-none px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-text-muted">{title}</summary>
+      <summary className="cursor-pointer select-none px-2 py-1.5 text-[12px] font-medium text-text-secondary transition-colors hover:text-text-primary">{title}</summary>
       <div className="px-2 pb-2">{body}</div>
     </details>
   );
@@ -171,9 +180,9 @@ function CallDetail({ runId, call, below, size: px, onClose }: { runId: string; 
             {" · "}{ms(call)}{call.resSize >= 0 && ` · ${size(call.resSize)}`}{" · "}{new Date(call.start).toLocaleTimeString()}
           </div>
         </div>
-        <button onClick={() => copy(call.uri)} title="Copy the URL" className="rounded p-1.5 text-text-muted hover:bg-white/5 hover:text-text-primary"><Copy size={12} /></button>
-        <button onClick={() => copy(curlOf(call, full?.raw ?? ""))} title="Copy as cURL" className="rounded p-1.5 text-text-muted hover:bg-white/5 hover:text-text-primary"><Terminal size={12} /></button>
-        <button onClick={onClose} title="Close" className="rounded p-1.5 text-text-muted hover:bg-white/5 hover:text-text-primary"><X size={12} /></button>
+        <button onClick={() => copy(call.uri)} title="Copy the URL" className={headBtn}><Copy size={12} /></button>
+        <button onClick={() => copy(curlOf(call, full?.raw ?? ""))} title="Copy as cURL" className={headBtn}><Terminal size={12} /></button>
+        <button onClick={onClose} title="Close" className={headBtn}><X size={12} /></button>
       </div>
       {section("Request headers", headers(call.reqHeaders))}
       {section("Request body", body(full?.req, full?.reqType ?? ""))}
@@ -210,5 +219,5 @@ function BodyView({ text, type }: { text: string; type: string }) {
     fit();
     return () => { sub.dispose(); const model = ed.getModel(); ed.dispose(); model?.dispose(); };
   }, [text, type]);
-  return <div ref={host} className="overflow-hidden rounded border border-subtle" style={{ height }} />;
+  return <div ref={host} className="overflow-hidden rounded-md border border-subtle" style={{ height }} />;
 }
