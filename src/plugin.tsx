@@ -309,8 +309,9 @@ const ON = { background: "var(--accent-soft)", color: "var(--text-primary)" } as
 const runDot = (s: store.Run["status"]) =>
   s === "running" ? "rgb(var(--tone-green-400))" : s === "ended" ? "var(--text-muted)" : "rgb(var(--tone-amber-400))";
 
-const time = (ts: number) =>
-  new Date(ts).toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+// One formatter for every log line: toLocaleTimeString with options builds a new one per call.
+const clock = new Intl.DateTimeFormat([], { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+const time = (ts: number) => clock.format(ts);
 
 /**
  * Whether this line repeats the previous one's timestamp and logger.
