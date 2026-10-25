@@ -4,6 +4,6 @@
   "description": "Launch a Flutter app on a device, then hot reload it from the footer.",
   "icon": "Zap",
   "color": "#38bdf8",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "minDeck": "1.6.0"
 }
