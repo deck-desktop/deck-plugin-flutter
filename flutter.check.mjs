@@ -454,13 +454,17 @@ const wss = [
   { id: "other", cwd: "D:/Flutter/personal/deck/" },
   { id: "home", cwd: "" },
 ];
-assert.equal(d.ownerWorkspace(wss, "D:/Flutter/hapster/hapster-mobile"), "mono");
-assert.equal(d.ownerWorkspace(wss, String.raw`d:\flutter\hapster\packages\video_trimmer\example`), "pkg",
-  "the deepest workspace wins when they nest");
-assert.equal(d.ownerWorkspace(wss, String.raw`D:\Flutter\hapster`), "mono", "the workspace's own folder");
-assert.equal(d.ownerWorkspace(wss, "D:/Flutter/hapster-other"), null,
+const trimmer = String.raw`d:\flutter\hapster\packages\video_trimmer\example`;
+assert.ok(d.runIsHere(wss, "mono", "D:/Flutter/hapster/hapster-mobile"));
+assert.ok(d.runIsHere(wss, "mono", trimmer), "the outer folder shows a run a nested workspace also holds");
+assert.ok(d.runIsHere(wss, "pkg", trimmer), "and so does the nested workspace");
+assert.ok(!d.runIsHere(wss, "pkg", "D:/Flutter/hapster/hapster-mobile"), "a nested workspace shows only its own");
+assert.ok(d.runIsHere(wss, "mono", String.raw`D:\Flutter\hapster`), "the workspace's own folder");
+assert.ok(!d.runIsHere(wss, "other", "D:/Flutter/hapster/hapster-mobile"), "another workspace's run is not here");
+assert.ok(!d.runIsHere([...wss, { id: "sib", cwd: "D:/Flutter/hapster-other" }], "mono", "D:/Flutter/hapster-other/app"),
   "a sibling folder sharing a prefix is not inside it");
-assert.equal(d.ownerWorkspace(wss, "C:/elsewhere"), null, "nothing claims it");
+assert.ok(d.runIsHere(wss, "other", "C:/elsewhere"), "a run no workspace holds shows everywhere");
+assert.ok(!d.runIsHere(wss, "home", "D:/Flutter/hapster/hapster-mobile"), "an empty folder holds nothing");
 
 // ---- naming an app in the picker --------------------------------------------------------------
 assert.equal(d.appLabel(String.raw`D:\Flutter\hapster`, String.raw`D:\Flutter\hapster\packages\video_trimmer\example`),
