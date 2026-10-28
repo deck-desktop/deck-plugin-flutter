@@ -118,24 +118,28 @@ export function shouldDescend(name: string): boolean {
   return !name.startsWith(".") && !SKIP_DIRS.has(name);
 }
 
+/** Whether a directory is a folder itself or inside it. An empty folder holds nothing. */
+const holds = (folder: string, dir: string) => {
+  const c = norm(folder), f = norm(dir);
+  return !!c && (f === c || f.startsWith(c + "/"));
+};
+
 /**
- * Which workspace a directory belongs to: the one whose folder contains it, the deepest when
- * workspaces nest. Null when none does.
+ * Whether a run in `dir` shows in the active workspace: when that workspace's folder holds it,
+ * or when no workspace's folder does.
  *
- * Runs are attributed this way rather than by recording the workspace that started them,
- * because an agent starts runs over MCP with only a directory to go on.
+ * Every workspace holding it shows it, not only the deepest. A folder of several repos is often
+ * open beside a workspace on one of them, and an app started from the folder's picker vanished
+ * from where it was started because the nested workspace claimed it.
+ *
+ * Decided by directory rather than by recording the workspace that started a run, because an
+ * agent starts runs over MCP with only a directory to go on.
  */
-export function ownerWorkspace(
-  workspaces: readonly { id: string; cwd: string }[], dir: string,
-): string | null {
-  const f = norm(dir);
-  let best: { id: string; len: number } | null = null;
-  for (const w of workspaces) {
-    const c = norm(w.cwd);
-    if (!c || (f !== c && !f.startsWith(c + "/"))) continue;
-    if (!best || c.length > best.len) best = { id: w.id, len: c.length };
-  }
-  return best?.id ?? null;
+export function runIsHere(
+  workspaces: readonly { id: string; cwd: string }[], activeWs: string, dir: string,
+): boolean {
+  const here = workspaces.find((w) => w.id === activeWs);
+  return (!!here && holds(here.cwd, dir)) || !workspaces.some((w) => holds(w.cwd, dir));
 }
 
 /** An app's name in the picker: its path under the workspace, or the folder name at the root. */

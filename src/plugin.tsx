@@ -22,7 +22,7 @@ import {
 import { configRead, exec, fsList, fsRead, type ExecOut } from "../shim/bridge.js";
 import { termWrite, getLayout, useLayout, type Layout } from "../shim/terminals.js";
 import {
-  isFlutterRun, runForFile, parseDevices, isFlutterPubspec, shouldDescend, ownerWorkspace, appLabel,
+  isFlutterRun, runForFile, parseDevices, isFlutterPubspec, shouldDescend, runIsHere, appLabel,
   type Device, type FlutterRun, type PaneProcs,
 } from "./detect.js";
 import { ContextMenu, StatusItem, type MenuEntry } from "../shim/ui.js";
@@ -157,8 +157,7 @@ const deviceIcon = (platform: string) => ICONS[platform.split("-")[0]] ?? Smartp
 const useRuns = () => useSyncExternalStore(store.subscribe, store.getRuns);
 
 /**
- * The runs that belong to the active workspace — the one whose folder holds the run's — plus any
- * run no workspace claims.
+ * The runs in the active workspace's folder, plus any run no workspace's folder holds (runIsHere).
  *
  * Without this, opening another workspace showed the first one's apps, and its buttons reloaded
  * them. The unclaimed ones are shown everywhere rather than nowhere: an agent can start a run in
@@ -166,10 +165,7 @@ const useRuns = () => useSyncExternalStore(store.subscribe, store.getRuns);
  */
 function runsHere(runs: store.Run[], l: Layout | null): store.Run[] {
   if (!l) return runs;
-  return runs.filter((r) => {
-    const owner = ownerWorkspace(l.workspaces, r.cwd);
-    return owner === null || owner === l.activeWs;
-  });
+  return runs.filter((r) => runIsHere(l.workspaces, l.activeWs, r.cwd));
 }
 
 /** The pane runs, polled. Shared by the tab and the footer. */
