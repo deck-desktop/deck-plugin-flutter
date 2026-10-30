@@ -4,6 +4,8 @@ Launch a Flutter app on a device, then hot reload it without leaving Deck. It li
 a readout with the running app and its buttons, and a **Flutter** panel beside Console in the
 footer drawer, which shows while the workspace is a Flutter project or an app is running.
 
+![Flutter](docs/screenshot.png)
+
 ## Running an app
 
 - **Run** from the footer or the panel: pick the app (a workspace with several, such as a package
@@ -34,6 +36,8 @@ as the Network tab in Flutter's DevTools, so the app needs no interceptor or pac
 anything built on dart:io's `HttpClient` (package:http, dio's default adapter); not Flutter web,
 native adapters such as `cupertino_http` or `cronet_http`, or native SDKs. A call made before the
 plugin attaches to the app, in the first moments of `main`, is not recorded.
+
+![The Network view](docs/network.png)
 
 ## For agents
 
