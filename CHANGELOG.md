@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.3 (2026-10-30)
+
+- A licence, this changelog, a README rewritten with a screenshot, and the permissions it uses
+  declared. Built from its own lockfile.
+
 ## 1.3.2 (2026-10-28)
 
 - A run shows in every workspace whose folder holds it
