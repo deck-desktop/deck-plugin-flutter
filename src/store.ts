@@ -7,7 +7,7 @@
 //
 // This owns the whole lifecycle of a daemon-driven run: spawn, the event subscription, the VM
 // Service socket, the log buffer, and the commands. The UI reads and calls; it holds nothing.
-import { procStream, procWrite, procKill, configWrite, setDebugTargets } from "../shim/bridge.js";
+import { procStream, procWrite, procKill, configWrite, setDebugTargets, isWindows } from "../shim/bridge.js";
 import { listen } from "@tauri-apps/api/event";
 import { notify, dismissNotification } from "../shim/ui.js";
 import {
@@ -318,7 +318,9 @@ export async function start(cwd: string, deviceId: string, deviceName: string): 
   publish();
 
   // Not awaited: this resolves when the app EXITS, which is the whole session.
-  const exit = procStream(id, "cmd", ["/C", "flutter", "run", "--machine", "-d", deviceId], cwd, true);
+  // Elsewhere flutter is a shell script, which starts as it is.
+  const args = ["run", "--machine", "-d", deviceId];
+  const exit = isWindows() ? procStream(id, "cmd", ["/C", "flutter", ...args], cwd, true) : procStream(id, "flutter", args, cwd, true);
   exits.set(id, exit);
   follow(run, exit);
   return id;

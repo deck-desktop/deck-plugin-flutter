@@ -36,7 +36,8 @@ export const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "").toL
  * cannot pass — which is why this splits rather than calling includes().
  */
 export function isFlutterRun(p: PaneProc): boolean {
-  if (p.name.toLowerCase() !== "dart.exe") return false;
+  // dart.exe on Windows; dart elsewhere (the SDK's binary, which flutter's script runs).
+  if (!["dart.exe", "dart"].includes(p.name.toLowerCase())) return false;
   const c = p.cmd.toLowerCase();
   return c.includes("flutter_tools.snapshot") && c.split(/\s+/).some((w) => w === "run");
 }
