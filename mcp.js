@@ -1,6 +1,6 @@
 // src/detect.ts
 function isFlutterRun(p) {
-  if (p.name.toLowerCase() !== "dart.exe") return false;
+  if (!["dart.exe", "dart"].includes(p.name.toLowerCase())) return false;
   const c = p.cmd.toLowerCase();
   return c.includes("flutter_tools.snapshot") && c.split(/\s+/).some((w) => w === "run");
 }
