@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.0 (2026-11-01)
+
+- Runs on Linux: its tools start without cmd /C and its processes are found by name. Needs Deck 1.15.0.
+
 ## 1.3.3 (2026-10-30)
 
 - A licence, this changelog, a README rewritten with a screenshot, and the permissions it uses
