@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- The run menu lists the Android emulators that are off, below the devices. Picking one starts it
+  and runs the app on it once it has booted.
+
 ## 1.4.0 (2026-11-01)
 
 - Runs on Linux: its tools start without cmd /C and its processes are found by name. Needs Deck 1.15.0.

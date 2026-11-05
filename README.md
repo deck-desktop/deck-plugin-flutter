@@ -9,7 +9,8 @@ footer drawer, which shows while the workspace is a Flutter project or an app is
 ## Running an app
 
 - **Run** from the footer or the panel: pick the app (a workspace with several, such as a package
-  and its `example/`, lists each) and a device.
+  and its `example/`, lists each) and a device. Android emulators that are off are listed below
+  the devices: picking one starts it, and the app runs on it once it has booted.
 - **A `flutter run` typed in a terminal** is found by itself, and the footer's buttons work for it
   too.
 - **Hot reload, hot restart and stop** from the footer, the panel, or the command palette.

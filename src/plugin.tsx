@@ -17,19 +17,18 @@
 // do, and the footer buttons should work for it.
 import { memo, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
-  Zap, RotateCw, Square, Play, Smartphone, Monitor, Globe, X, Copy, Trash2, WrapText, Clock, ScrollText, ArrowDownUp, Search,
+  Zap, RotateCw, Square, Play, Smartphone, X, Copy, Trash2, WrapText, Clock, ScrollText, ArrowDownUp, Search,
 } from "lucide-react";
-import { configRead, exec, fsList, fsRead, type ExecOut } from "../shim/bridge.js";
+import { configRead, fsRead } from "../shim/bridge.js";
 import { termWrite, getLayout, useLayout, type Layout } from "../shim/terminals.js";
-import {
-  isFlutterRun, runForFile, parseDevices, isFlutterPubspec, shouldDescend, runIsHere, appLabel,
-  type Device, type FlutterRun, type PaneProcs,
-} from "./detect.js";
-import { ContextMenu, StatusItem, type MenuEntry } from "../shim/ui.js";
+import { isFlutterRun, runForFile, runIsHere, type FlutterRun, type PaneProcs } from "./detect.js";
+import { StatusItem } from "../shim/ui.js";
 import { parseStackFrame, frameFile } from "./daemon.js";
 import * as store from "./store.js";
 import { matcher, regexSyntax, validRegex } from "./filter.js";
 import { NetworkView } from "./network.js";
+import { appsIn, appsCache, currentCwd } from "./apps.js";
+import { DevicePicker, deviceIcon } from "./DevicePicker.js";
 
 /** How often to re-read which panes are running an app. Matches Deck's sweep interval. */
 const POLL_MS = 10_000;
@@ -64,68 +63,6 @@ async function findPaneRuns(l: Layout | null): Promise<FlutterRun[]> {
 }
 
 /**
- * The Flutter apps in a workspace: its own folder, and any nested under it.
- *
- * A workspace is often not one app. A package's runnable app is its example/, a monorepo keeps
- * apps under apps/ or beside packages/, and the workspace root may have no pubspec at all — so
- * asking only "is the root a Flutter project" both missed apps and offered packages that cannot
- * be run. An app here is a pubspec that names flutter AND a lib/main.dart.
- *
- * Breadth-first to a fixed depth, skipping build output and platform folders (see shouldDescend).
- * ponytail: depth 3 and a cap on folders visited bound the cost on a huge tree; an app deeper than
- * that is not offered, and the fix is raising MAX_DEPTH, not a smarter walk.
- *
- * Cached per workspace folder because `panelWhen` is synchronous and runs on every footer render.
- * The picker re-scans each time it opens, so an app created mid-session appears there.
- */
-const appsCache = new Map<string, string[]>();
-const MAX_DEPTH = 3;
-const MAX_DIRS = 400;
-
-/** The active workspace's directory, read straight from the layout store. */
-function currentCwd(): string {
-  const l = getLayout();
-  return l?.workspaces.find((w) => w.id === l.activeWs)?.cwd ?? "";
-}
-
-async function isApp(dir: string, entries: { name: string; dir: boolean }[]): Promise<boolean> {
-  if (!entries.some((e) => !e.dir && e.name === "pubspec.yaml")) return false;
-  if (!entries.some((e) => e.dir && e.name === "lib")) return false;
-  try {
-    if (!isFlutterPubspec(await fsRead(`${dir}/pubspec.yaml`))) return false;
-    return (await fsList(`${dir}/lib`)).some((e) => !e.dir && e.name === "main.dart");
-  } catch { return false; }
-}
-
-async function scanApps(root: string): Promise<string[]> {
-  if (!root) return [];
-  const found: string[] = [];
-  let level = [root];
-  let visited = 0;
-  for (let depth = 0; depth <= MAX_DEPTH && level.length && visited < MAX_DIRS; depth++) {
-    const next: string[] = [];
-    await Promise.all(level.map(async (dir) => {
-      visited++;
-      let entries: { name: string; path: string; dir: boolean }[] = [];
-      try { entries = await fsList(dir); } catch { return; }
-      if (await isApp(dir, entries)) found.push(dir);
-      for (const e of entries) if (e.dir && shouldDescend(e.name)) next.push(e.path);
-    }));
-    level = next;
-  }
-  // The root first, then the rest by path, so the order is the same every time it opens.
-  found.sort((a, b) => (a === root ? -1 : b === root ? 1 : a.localeCompare(b)));
-  appsCache.set(root, found);
-  return found;
-}
-
-/** The cached answer when there is one, else a scan. */
-const appsIn = (root: string) => {
-  const seen = appsCache.get(root);
-  return seen ? Promise.resolve(seen) : scanApps(root);
-};
-
-/**
  * The project's own package name, from pubspec.yaml — what a `package:` stack frame is prefixed
  * with when the code is the app's rather than a dependency's.
  *
@@ -146,12 +83,6 @@ async function packageName(cwd: string): Promise<string> {
   packageCache.set(cwd, name);
   return name;
 }
-
-const ICONS: Record<string, typeof Monitor> = {
-  windows: Monitor, macos: Monitor, linux: Monitor,
-  web: Globe, android: Smartphone, ios: Smartphone,
-};
-const deviceIcon = (platform: string) => ICONS[platform.split("-")[0]] ?? Smartphone;
 
 /** Subscribe to the runs store. */
 const useRuns = () => useSyncExternalStore(store.subscribe, store.getRuns);
@@ -223,79 +154,6 @@ void configRead(RELOAD_KEY)
   .catch((e) => console.warn("[flutter] settings load failed", e));
 
 wireSaveReload();
-
-/**
- * Pick an app and a device, then launch. Used from the footer readout and the panel.
- *
- * With one app in the workspace the menu is just its devices. With several, each app is a row
- * whose submenu is the devices, so running a package's example/ is two clicks rather than
- * impossible.
- *
- * Deck's own ContextMenu rather than a hand-placed box: it flips and clamps to the window. The
- * box this replaced always opened upward, which suited the footer and clipped off the top of the
- * screen when the panel sat in a pane near the top.
- */
-function DevicePicker({ root, onPick, children }: {
-  root: string;
-  onPick: (app: string, d: Device) => void;
-  children: React.ReactNode;
-}) {
-  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
-  const [apps, setApps] = useState<string[] | null>(null);
-  const [devices, setDevices] = useState<Device[] | null>(null);
-  const anchor = useRef<HTMLButtonElement>(null);
-  const open = at !== null;
-
-  // Both fetched when the menu opens, never on a poll: `flutter devices` probes adb and the
-  // browsers and takes several seconds, which is fine once on a click and not fine every 10s.
-  useEffect(() => {
-    if (!open) return;
-    let alive = true;
-    setApps(null);
-    setDevices(null);
-    void scanApps(root).then((a) => {
-      if (!alive) return;
-      setApps(a);
-      exec("flutter", ["devices", "--machine"], a[0] ?? root)
-        .then((r: ExecOut) => { if (alive) setDevices(parseDevices(r.stdout)); })
-        .catch(() => { if (alive) setDevices([]); });
-    });
-    return () => { alive = false; };
-  }, [open, root]);
-
-  const toggle = () => {
-    if (open || !anchor.current) { setAt(null); return; }
-    const r = anchor.current.getBoundingClientRect();
-    // Raised from whichever edge has room, so it opens away from the button rather than over it.
-    const below = window.innerHeight - r.bottom;
-    setAt({ x: r.right, y: below >= r.top ? r.bottom + 4 : r.top - 4 });
-  };
-
-  const deviceItems = (app: string): MenuEntry[] => {
-    if (devices === null) return [{ label: "Finding devices…", disabled: true }];
-    if (!devices.length) return [{ label: "No devices found", disabled: true }];
-    return devices.map((d) => ({
-      label: d.name,
-      subLabel: d.emulator ? "emulator" : undefined,
-      icon: deviceIcon(d.platform),
-      onClick: () => { setAt(null); onPick(app, d); },
-    }));
-  };
-
-  const items: MenuEntry[] =
-    apps === null ? [{ label: "Looking for apps…", disabled: true }]
-    : !apps.length ? [{ label: "No Flutter app in this workspace", disabled: true }]
-    : apps.length === 1 ? deviceItems(apps[0])
-    : apps.map((a) => ({ label: appLabel(root, a), icon: Smartphone, children: deviceItems(a) }));
-
-  return (
-    <>
-      <button ref={anchor} onClick={toggle} onMouseDown={(e) => e.stopPropagation()}
-        title="Run a Flutter app">{children}</button>
-      {at && <ContextMenu x={at.x} y={at.y} alignRight items={items} onClose={() => setAt(null)} />}
-    </>
-  );
-}
 
 /** The panel's toolbar buttons; a switched-on toggle adds `ON` as its style. */
 const toolBtn = "grid size-7 shrink-0 place-items-center rounded-lg text-text-muted transition-colors hover:bg-white/5 hover:text-text-primary";

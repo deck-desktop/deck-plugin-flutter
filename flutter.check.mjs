@@ -520,4 +520,25 @@ assert.equal(n.curlOf(c, `{"it's":1}`),
   "cURL keeps the headers that matter and quotes for a shell");
 assert.equal(n.curlOf({ ...c, method: "GET" }), `curl 'https://api.test/post?i=7' -H 'content-type: application/json'`);
 
+// ---- parseEmulators ------------------------------------------------------------------------
+const EMULATORS = `2 available emulators:
+
+Id                     • Name                   • Manufacturer • Platform
+
+Pixel_7_API_34         • Pixel 7 API 34         • Google       • android
+Medium_Phone           • Medium Phone - test    • Generic      • Android
+
+To run an emulator, run 'flutter emulators --launch <emulator id>'.
+To create a new emulator, run 'flutter emulators --create [--name xyz]'.
+`;
+assert.deepEqual(d.parseEmulators(EMULATORS), [
+  { id: "Pixel_7_API_34", name: "Pixel 7 API 34", platform: "android" },
+  { id: "Medium_Phone", name: "Medium Phone", platform: "android" },
+], "rows only, not the heading or the hints; a name with ' - ' is cut, the id and platform are not");
+assert.deepEqual(d.parseEmulators("Pixel_7 � Pixel 7 � Google � android\r\n").map((e) => e.id), ["Pixel_7"],
+  "the bullet written in the console's code page, read as UTF-8");
+assert.deepEqual(d.parseEmulators("No emulators available.\n"), []);
+assert.equal(d.parseEmulators("Pixel_7 • Pixel 7 •              • android\n")[0].platform, "android",
+  "no manufacturer: an empty, padded column between two bullets");
+
 console.log("flutter.check.mjs: all assertions passed");
