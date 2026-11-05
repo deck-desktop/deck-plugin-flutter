@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.5.0 (2026-11-05)
 
 - The run menu lists the Android emulators that are off, below the devices. Picking one starts it
   and runs the app on it once it has booted.
