@@ -2,9 +2,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Smartphone, Monitor, Globe } from "lucide-react";
 import { exec, type ExecOut } from "../shim/bridge.js";
-import { parseDevices, appLabel, type Device } from "./detect.js";
+import { parseDevices, appLabel, type Device, type Emulator } from "./detect.js";
 import { ContextMenu, type MenuEntry } from "../shim/ui.js";
 import { scanApps } from "./apps.js";
+import { listEmulators, offline, startEmulator } from "./emulators.js";
 
 const ICONS: Record<string, typeof Monitor> = {
   windows: Monitor, macos: Monitor, linux: Monitor,
@@ -31,22 +32,30 @@ export function DevicePicker({ root, onPick, children }: {
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
   const [apps, setApps] = useState<string[] | null>(null);
   const [devices, setDevices] = useState<Device[] | null>(null);
+  const [emulators, setEmulators] = useState<Emulator[]>([]);
   const anchor = useRef<HTMLButtonElement>(null);
   const open = at !== null;
 
-  // Both fetched when the menu opens, never on a poll: `flutter devices` probes adb and the
+  // All fetched when the menu opens, never on a poll: `flutter devices` probes adb and the
   // browsers and takes several seconds, which is fine once on a click and not fine every 10s.
+  // The emulators are listed alongside, and the running ones left out once the devices are in.
   useEffect(() => {
     if (!open) return;
     let alive = true;
     setApps(null);
     setDevices(null);
+    setEmulators([]);
     void scanApps(root).then((a) => {
       if (!alive) return;
       setApps(a);
+      const all = listEmulators(a[0] ?? root);
       exec("flutter", ["devices", "--machine"], a[0] ?? root)
-        .then((r: ExecOut) => { if (alive) setDevices(parseDevices(r.stdout)); })
-        .catch(() => { if (alive) setDevices([]); });
+        .then((r: ExecOut) => parseDevices(r.stdout), () => [])
+        .then((ds) => {
+          if (!alive) return;
+          setDevices(ds);
+          void all.then((e) => offline(e, ds)).then((e) => { if (alive) setEmulators(e); });
+        });
     });
     return () => { alive = false; };
   }, [open, root]);
@@ -61,13 +70,24 @@ export function DevicePicker({ root, onPick, children }: {
 
   const deviceItems = (app: string): MenuEntry[] => {
     if (devices === null) return [{ label: "Finding devices…", disabled: true }];
-    if (!devices.length) return [{ label: "No devices found", disabled: true }];
-    return devices.map((d) => ({
+    const on: MenuEntry[] = devices.map((d) => ({
       label: d.name,
       subLabel: d.emulator ? "emulator" : undefined,
       icon: deviceIcon(d.platform),
       onClick: () => { setAt(null); onPick(app, d); },
     }));
+    // An emulator that is off is started first, and the app runs on it once it has booted.
+    const off: MenuEntry[] = emulators.map((e) => ({
+      label: e.name,
+      subLabel: "emulator, off: starts it",
+      icon: deviceIcon(e.platform),
+      onClick: () => {
+        setAt(null);
+        void startEmulator(e, devices, app).then((d) => { if (d) onPick(app, d); });
+      },
+    }));
+    if (!on.length && !off.length) return [{ label: "No devices found", disabled: true }];
+    return on.length && off.length ? [...on, "sep", ...off] : [...on, ...off];
   };
 
   const items: MenuEntry[] =

@@ -94,6 +94,26 @@ export function parseDevices(stdout: string): Device[] {
   });
 }
 
+/** One emulator as `flutter emulators` lists it: an Android AVD, running or not. */
+export interface Emulator { id: string; name: string; platform: string }
+
+/**
+ * Parse `flutter emulators`. It has no --machine output, so this reads its table, rows of
+ * `id • name • manufacturer • platform` under an `Id • Name • …` heading.
+ *
+ * The bullet arrives as U+FFFD when flutter writes in the console's code page rather than UTF-8,
+ * so any short run of punctuation between spaces separates columns. A name holding " - " splits
+ * into more columns; the id stays the first and the platform the last, so only the name is cut.
+ */
+export function parseEmulators(stdout: string): Emulator[] {
+  return stdout.split(/\r?\n/).flatMap((line) => {
+    // Repeated, as an empty column (no manufacturer) is a padded gap between two bullets.
+    const cols = line.trim().split(/\s+(?:[^\w\s]{1,3}\s+)+/);
+    if (cols.length < 3 || cols[0] === "Id" || /\s/.test(cols[0])) return [];
+    return [{ id: cols[0], name: cols[1], platform: cols[cols.length - 1].toLowerCase() }];
+  });
+}
+
 /**
  * Whether a pubspec.yaml is a Flutter project's rather than a pure Dart package's — both have
  * one, and only the first can be run on a device.
