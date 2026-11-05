@@ -45,11 +45,11 @@ export async function startEmulator(emu: Emulator, before: Device[], cwd: string
   let failed = "";
   // Not awaited: flutter returns three seconds after starting the emulator, and the wait below is
   // what matters. An emulator that quits in those seconds (an AVD already running, no
-  // acceleration) is reported in its output, and the exit code can still be 0.
+  // acceleration), or an id that matches none, is reported in its output with exit code 0.
   exec("flutter", ["emulators", "--launch", emu.id], cwd)
     .then((r) => {
       const said = `${r.stderr}\n${r.stdout}`.trim();
-      if (r.code !== 0 || /exited with code/.test(said)) failed = said || `exit code ${r.code}`;
+      if (r.code !== 0 || /exited with code|No emulator found|More than one emulator/.test(said)) failed = said || `exit code ${r.code}`;
     })
     .catch((e) => { failed = String(e); });
 
