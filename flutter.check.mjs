@@ -541,4 +541,11 @@ assert.deepEqual(d.parseEmulators("No emulators available.\n"), []);
 assert.equal(d.parseEmulators("Pixel_7 • Pixel 7 •              • android\n")[0].platform, "android",
   "no manufacturer: an empty, padded column between two bullets");
 
+// A project of several folders (Deck's multi-root projects): one key of every local folder; a run in
+// any of them is here; an app labelled under its folder's name.
+assert.equal(d.projectRoot({ cwd: "D:/shop/app", folders: ["D:/shop/api", "vps:/srv/x"] }), "D:/shop/app|D:/shop/api");
+assert.equal(d.runIsHere([{ id: "a", cwd: "D:/shop/app", folders: ["D:/shop/mobile"] }, { id: "b", cwd: "D:/other" }], "a", "d:/shop/mobile/example"), true);
+assert.equal(d.runIsHere([{ id: "a", cwd: "D:/shop/app" }, { id: "b", cwd: "D:/x", folders: ["D:/shop/mobile"] }], "a", "D:/shop/mobile"), false);
+assert.equal(d.appLabel("D:/shop/app|D:/shop/mobile", "D:/shop/mobile/example"), "mobile/example");
+
 console.log("flutter.check.mjs: all assertions passed");

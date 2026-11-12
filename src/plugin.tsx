@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import { configRead, fsRead } from "../shim/bridge.js";
 import { termWrite, getLayout, useLayout, type Layout } from "../shim/terminals.js";
-import { isFlutterRun, runForFile, runIsHere, type FlutterRun, type PaneProcs } from "./detect.js";
+import { isFlutterRun, projectRoot, runForFile, runIsHere, type FlutterRun, type PaneProcs } from "./detect.js";
 import { StatusItem } from "../shim/ui.js";
 import { parseStackFrame, frameFile } from "./daemon.js";
 import * as store from "./store.js";
@@ -38,10 +38,10 @@ function paneInfo(l: Layout | null, id: string): { cwd: string; wsId: string; la
   if (!l) return null;
   for (const w of l.workspaces) {
     for (const t of w.tabs) {
-      const walk = (n: typeof t.root): string | null =>
-        n.kind === "leaf" ? (n.id === id ? (n.label || t.title) : null) : (walk(n.a) ?? walk(n.b));
+      const walk = (n: typeof t.root): { label: string; cwd?: string } | null =>
+        n.kind === "leaf" ? (n.id === id ? { label: n.label || t.title, cwd: (n as { cwd?: string }).cwd } : null) : (walk(n.a) ?? walk(n.b));
       const hit = walk(t.root);
-      if (hit) return { cwd: w.cwd, wsId: w.id, label: `${w.name} · ${hit}` };
+      if (hit) return { cwd: hit.cwd ?? w.cwd, wsId: w.id, label: `${w.name} · ${hit.label}` };
     }
   }
   return null;
@@ -282,7 +282,7 @@ export function Panel() {
   const [view, setView] = useState<"logs" | "network">(prefs.view ?? "logs");
   /** The running project's package name, for resolving `package:` frames to files on disk. */
   const [pkg, setPkg] = useState("");
-  const wsCwd = layout?.workspaces.find((w) => w.id === layout.activeWs)?.cwd ?? "";
+  const wsCwd = projectRoot(layout?.workspaces.find((w) => w.id === layout.activeWs)); // every folder of it
 
   const active = runs.find((r) => r.id === selected) ?? runs[0] ?? null;
 
@@ -571,7 +571,7 @@ export function Status() {
   const daemonRuns = runsHere(useRuns(), layout).filter((r) => r.status !== "ended");
   const paneRuns = usePaneRuns().filter((r) => r.wsId === layout?.activeWs);
   const [busy, setBusy] = useState("");
-  const wsCwd = layout?.workspaces.find((w) => w.id === layout.activeWs)?.cwd ?? "";
+  const wsCwd = projectRoot(layout?.workspaces.find((w) => w.id === layout.activeWs)); // every folder of it
 
   // Always ask, even while something is running — the answer also decides whether the drawer tab
   // shows, and `panelWhen` reads it from the cache this fills. Resolving it here is what makes the
