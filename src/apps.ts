@@ -1,7 +1,7 @@
 // The Flutter apps in a workspace's folder, found by walking it (see scanApps).
 import { fsList, fsRead } from "../shim/bridge.js";
 import { getLayout } from "../shim/terminals.js";
-import { isFlutterPubspec, shouldDescend } from "./detect.js";
+import { isFlutterPubspec, projectRoot, shouldDescend } from "./detect.js";
 
 /**
  * The Flutter apps in a workspace: its own folder, and any nested under it.
@@ -25,7 +25,7 @@ const MAX_DIRS = 400;
 /** The active workspace's directory, read straight from the layout store. */
 export function currentCwd(): string {
   const l = getLayout();
-  return l?.workspaces.find((w) => w.id === l.activeWs)?.cwd ?? "";
+  return projectRoot(l?.workspaces.find((w) => w.id === l.activeWs)); // every folder of it (detect.ts)
 }
 
 async function isApp(dir: string, entries: { name: string; dir: boolean }[]): Promise<boolean> {
@@ -39,6 +39,12 @@ async function isApp(dir: string, entries: { name: string; dir: boolean }[]): Pr
 
 export async function scanApps(root: string): Promise<string[]> {
   if (!root) return [];
+  // A project of several folders (projectRoot, "a|b"): each scanned, in order, under one key.
+  if (root.includes("|")) {
+    const all = (await Promise.all(root.split("|").filter(Boolean).map(scanApps))).flat();
+    appsCache.set(root, all);
+    return all;
+  }
   const found: string[] = [];
   let level = [root];
   let visited = 0;

@@ -157,14 +157,33 @@ const holds = (folder: string, dir: string) => {
  * agent starts runs over MCP with only a directory to go on.
  */
 export function runIsHere(
-  workspaces: readonly { id: string; cwd: string }[], activeWs: string, dir: string,
+  workspaces: readonly { id: string; cwd: string; folders?: string[] }[], activeWs: string, dir: string,
 ): boolean {
+  // Any of a project's folders (Deck's multi-root projects).
+  const holdsIn = (w: { cwd: string; folders?: string[] }) => [w.cwd, ...(w.folders ?? [])].some((f) => holds(f, dir));
   const here = workspaces.find((w) => w.id === activeWs);
-  return (!!here && holds(here.cwd, dir)) || !workspaces.some((w) => holds(w.cwd, dir));
+  return (!!here && holdsIn(here)) || !workspaces.some(holdsIn);
+}
+
+/**
+ * What the app scan covers for a project: its folder, or with several (Deck's multi-root projects)
+ * all of them joined with "|", the main one first. Only folders on this PC: an app runs here.
+ */
+export function projectRoot(w: { cwd: string; folders?: string[] } | undefined): string {
+  if (!w) return "";
+  const local = (w.folders ?? []).filter((f) => f && !/^[A-Za-z0-9._@-]{2,}(\+sudo)?:\//.test(f));
+  return [w.cwd, ...local].join("|");
 }
 
 /** An app's name in the picker: its path under the workspace, or the folder name at the root. */
 export function appLabel(root: string, app: string): string {
+  // Several folders ("a|b", projectRoot): under the name of the one holding it.
+  if (root.includes("|")) {
+    const holder = root.split("|").filter((f) => holds(f, app)).sort((a, b) => b.length - a.length)[0];
+    if (!holder) return app;
+    const top = holder.replace(/\\/g, "/").replace(/\/+$/, "").split("/").pop() || holder;
+    return norm(app) === norm(holder) ? top : `${top}/${appLabel(holder, app)}`;
+  }
   const r = norm(root);
   const a = app.replace(/\\/g, "/").replace(/\/+$/, "");
   if (norm(a) === r) return a.split("/").pop() || a;

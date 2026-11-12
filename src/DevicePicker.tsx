@@ -48,8 +48,8 @@ export function DevicePicker({ root, onPick, children }: {
     void scanApps(root).then((a) => {
       if (!alive) return;
       setApps(a);
-      const all = listEmulators(a[0] ?? root);
-      exec("flutter", ["devices", "--machine"], a[0] ?? root)
+      const all = listEmulators(a[0] ?? root.split("|")[0]);
+      exec("flutter", ["devices", "--machine"], a[0] ?? root.split("|")[0])
         .then((r: ExecOut) => parseDevices(r.stdout), () => [])
         .then((ds) => {
           if (!alive) return;
