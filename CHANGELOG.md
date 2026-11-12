@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.0 (2026-11-12)
+
+- In a project with several folders (Deck 1.17.3), Flutter finds the apps in every folder.
+
 ## 1.5.0 (2026-11-05)
 
 - The run menu lists the Android emulators that are off, below the devices. Picking one starts it
