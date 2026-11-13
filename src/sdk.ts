@@ -47,10 +47,19 @@ export async function findPin(dir: string): Promise<{ dir: string; pin: string }
 let fvmInfo: Promise<{ installed: boolean; versions: string }> | null = null;
 export function fvm() {
   fvmInfo ??= exec("fvm", ["api", "context"]).then(async (o) => {
-    // Its context also lists the environment, so only the one field is kept and nothing is logged.
-    const dir = o.code === 0 ? (JSON.parse(o.stdout) as { context?: { versionsCachePath?: string } }).context?.versionsCachePath : undefined;
+    // Its context also lists the environment, so only the one field is kept and nothing of the
+    // output is logged. Anything printed around the JSON (an update notice) is skipped.
+    let dir: string | undefined;
+    try {
+      const json = o.stdout.slice(o.stdout.indexOf("{"), o.stdout.lastIndexOf("}") + 1);
+      dir = (JSON.parse(json) as { context?: { versionsCachePath?: string } }).context?.versionsCachePath;
+    } catch { console.warn("[flutter] fvm api context did not print its JSON; using ~/fvm"); }
     return { installed: o.code === 0, versions: dir || join(await fsHomeDir(), "fvm", "versions") };
-  }).catch(async () => ({ installed: false, versions: join(await fsHomeDir(), "fvm", "versions") }));
+  }).catch(async (e) => {
+    // Expected on a machine without FVM: "fvm" is not a program there.
+    console.info("[flutter] FVM not found", String(e));
+    return { installed: false, versions: join(await fsHomeDir(), "fvm", "versions") };
+  });
   return fvmInfo;
 }
 
@@ -81,13 +90,14 @@ export async function sdkFor(app: string): Promise<Sdk> {
   const pin = found?.pin ?? null;
   const choice = picked.get(key(app)) ?? pin;
   if (choice && choice !== PATH_CHOICE) {
-    const roots: string[] = [];
     // `fvm use` links the project's .fvm/flutter_sdk to the pinned SDK; a picked version has no link.
-    if (found && choice === pin) roots.push(join(found.dir, ".fvm", "flutter_sdk"));
-    roots.push(join((await fvm()).versions, choice));
-    for (const root of roots) {
-      const exe = join(root, "bin", script());
-      if (await exists(exe)) return { flutter: exe, version: (await versionIn(root)) ?? choice, source: "fvm", pin, picked: choice !== pin };
+    // FVM itself is asked for its cache only after that, since its first start can take seconds.
+    const link = found && choice === pin ? join(found.dir, ".fvm", "flutter_sdk") : null;
+    for (const root of [link, async () => join((await fvm()).versions, choice)]) {
+      if (!root) continue;
+      const dir = typeof root === "string" ? root : await root();
+      const exe = join(dir, "bin", script());
+      if (await exists(exe)) return { flutter: exe, version: (await versionIn(dir)) ?? choice, source: "fvm", pin, picked: choice !== pin };
     }
     return { flutter: "flutter", version: choice, source: "fvm", pin, missing: true, picked: choice !== pin };
   }
@@ -100,7 +110,8 @@ export const sdkLabel = (s: Sdk) => `${s.version ?? "Flutter"} · ${s.source ===
 /** The versions FVM has installed, by folder name. */
 export async function installedVersions(): Promise<string[]> {
   const { versions } = await fvm();
-  return fsList(versions).then((l) => l.filter((e) => e.dir).map((e) => e.name), () => []);
+  // Not filtered on `dir`: a version can be a link (a custom SDK, `fvm fork`), which lists as a file.
+  return fsList(versions).then((l) => l.filter((e) => !e.name.startsWith(".")).map((e) => e.name), () => []);
 }
 
 /** The newest releases FVM can install, fetched once a session and only when asked for. */
