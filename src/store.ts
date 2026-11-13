@@ -16,6 +16,7 @@ import {
   parseLogRecord, parseFlutterError, levelOf, exitNotice, type DaemonEvent,
 } from "./daemon.js";
 import { toCall, type NetCall } from "./net.js";
+import { askToInstall, sdkFor, type Sdk } from "./sdk.js";
 import { netState, rpc, netFrame, startHttpLogging, pollNet, type NetState } from "./netprofile.js";
 
 /** One line in the log view. */
@@ -54,6 +55,8 @@ export interface Run {
    */
   stopRequested?: boolean;
   log: LogLine[];
+  /** The Flutter it runs on (sdk.ts), as resolved when it started. */
+  sdk?: Sdk;
   /** Live VM Service socket, when the Logging stream is attached. */
   ws?: WebSocket;
   /** The VM Service's address, which the editor's debugger attaches to (publishTargets). */
@@ -291,25 +294,28 @@ function attachLogging(run: Run, uri: string) {
 }
 
 /**
- * Start an app and stream it.
+ * Start an app and stream it, on the Flutter its project pins with FVM or else the one on PATH.
+ * Resolves to "" without starting when that version is not installed, after saying so.
  *
- * `flutter` rather than an absolute path: it is a .bat shim on Windows, which `Command::new`
- * cannot launch directly, so this goes through cmd.exe — which also gives PATH resolution.
+ * PATH's `flutter` goes through cmd.exe on Windows, which finds the .bat shim; an SDK's own
+ * flutter.bat is a full path, which runs as it is.
  */
 export async function start(cwd: string, deviceId: string, deviceName: string): Promise<string> {
+  const sdk = await sdkFor(cwd);
+  if (sdk.missing) { void askToInstall(cwd, sdk, () => void start(cwd, deviceId, deviceName)); return ""; }
   await wire();
   const id = `flutter-${Date.now().toString(36)}`;
   const run: Run = {
-    id, cwd, deviceId, deviceName, appId: "", status: "starting", log: [], net: [],
+    id, cwd, deviceId, deviceName, appId: "", status: "starting", log: [], net: [], sdk,
   };
   runs.set(id, run);
-  append(run, `flutter run -d ${deviceId}`, "deck");
+  append(run, `flutter run -d ${deviceId}${sdk.source === "fvm" ? ` (Flutter ${sdk.version} from FVM: ${sdk.flutter})` : ""}`, "deck");
   publish();
 
   // Not awaited: this resolves when the app EXITS, which is the whole session.
   // Elsewhere flutter is a shell script, which starts as it is.
   const args = ["run", "--machine", "-d", deviceId];
-  const exit = isWindows() ? procStream(id, "cmd", ["/C", "flutter", ...args], cwd, true) : procStream(id, "flutter", args, cwd, true);
+  const exit = isWindows() && sdk.flutter === "flutter" ? procStream(id, "cmd", ["/C", "flutter", ...args], cwd, true) : procStream(id, sdk.flutter, args, cwd, true);
   exits.set(id, exit);
   follow(run, exit);
   return id;

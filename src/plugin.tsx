@@ -402,7 +402,7 @@ export function Panel() {
                 on ? "text-text-primary" : "text-text-muted hover:bg-white/5 hover:text-text-primary"}`}
               style={on ? { background: "var(--bg-elev)", boxShadow: "inset 0 0 0 1px var(--border-strong)" } : undefined}>
               <Icon size={13} className="shrink-0" />
-              <span className="truncate">{r.deviceName}</span>
+              <span className="truncate">{r.deviceName}</span>{r.sdk?.source === "fvm" && <span className="shrink-0 rounded-full px-1.5 text-[10.5px] text-accent" style={{ background: "color-mix(in srgb, var(--accent) 14%, transparent)" }} title={r.sdk.flutter}>{r.sdk.version} · FVM</span>}
               <span className="size-[7px] shrink-0 rounded-full" title={r.status} style={{ background: runDot(r.status) }} />
             </button>
           );
@@ -625,7 +625,7 @@ export function Status() {
         color={color}
         label={daemon ? daemon.deviceName : pane?.label ?? "flutter run"}
         detail={daemon && daemon.status !== "running" ? daemon.status : undefined}
-        title={`${label} — show its log`}
+        title={`${label} — show its log${daemon?.sdk ? `\nFlutter ${daemon.sdk.version} from ${daemon.sdk.source === "fvm" ? "FVM" : "PATH"}` : ""}`}
         onClick={() => window.dispatchEvent(new CustomEvent("deck-footer-tab", { detail: "plugin:flutter" }))}
       />
       <button onClick={() => act("reload")} title="Hot reload (r)"

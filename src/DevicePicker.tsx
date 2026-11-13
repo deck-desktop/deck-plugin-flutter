@@ -6,6 +6,8 @@ import { parseDevices, appLabel, type Device, type Emulator } from "./detect.js"
 import { ContextMenu, type MenuEntry } from "../shim/ui.js";
 import { scanApps } from "./apps.js";
 import { listEmulators, offline, startEmulator } from "./emulators.js";
+import { sdkFor } from "./sdk.js";
+import { useVersionMenu } from "./useVersionMenu.js";
 
 const ICONS: Record<string, typeof Monitor> = {
   windows: Monitor, macos: Monitor, linux: Monitor,
@@ -35,6 +37,7 @@ export function DevicePicker({ root, onPick, children }: {
   const [emulators, setEmulators] = useState<Emulator[]>([]);
   const anchor = useRef<HTMLButtonElement>(null);
   const open = at !== null;
+  const { versionRow, dialog } = useVersionMenu(open, apps);
 
   // All fetched when the menu opens, never on a poll: `flutter devices` probes adb and the
   // browsers and takes several seconds, which is fine once on a click and not fine every 10s.
@@ -45,11 +48,15 @@ export function DevicePicker({ root, onPick, children }: {
     setApps(null);
     setDevices(null);
     setEmulators([]);
-    void scanApps(root).then((a) => {
+    void scanApps(root).then(async (a) => {
       if (!alive) return;
       setApps(a);
-      const all = listEmulators(a[0] ?? root.split("|")[0]);
-      exec("flutter", ["devices", "--machine"], a[0] ?? root.split("|")[0])
+      // Listed by the first app's Flutter: a project with only an FVM SDK may have none on PATH.
+      const dir = a[0] ?? root.split("|")[0];
+      const sdk = await sdkFor(dir);
+      const flutter = sdk.missing ? "flutter" : sdk.flutter;
+      const all = listEmulators(dir, flutter);
+      exec(flutter, ["devices", "--machine"], dir)
         .then((r: ExecOut) => parseDevices(r.stdout), () => [])
         .then((ds) => {
           if (!alive) return;
@@ -83,24 +90,31 @@ export function DevicePicker({ root, onPick, children }: {
       icon: deviceIcon(e.platform),
       onClick: () => {
         setAt(null);
-        void startEmulator(e, devices, app).then((d) => { if (d) onPick(app, d); });
+        void sdkFor(app).then((s) => startEmulator(e, devices, app, s.missing ? "flutter" : s.flutter)).then((d) => { if (d) onPick(app, d); });
       },
     }));
     if (!on.length && !off.length) return [{ label: "No devices found", disabled: true }];
     return on.length && off.length ? [...on, "sep", ...off] : [...on, ...off];
   };
 
+  // Which Flutter it runs on comes first, where FVM is in play (useVersionMenu).
+  const withVersion = (app: string): MenuEntry[] => {
+    const row = versionRow(app);
+    return row ? [row, "sep", ...deviceItems(app)] : deviceItems(app);
+  };
+
   const items: MenuEntry[] =
     apps === null ? [{ label: "Looking for apps…", disabled: true }]
     : !apps.length ? [{ label: "No Flutter app in this workspace", disabled: true }]
-    : apps.length === 1 ? deviceItems(apps[0])
-    : apps.map((a) => ({ label: appLabel(root, a), icon: Smartphone, children: deviceItems(a) }));
+    : apps.length === 1 ? withVersion(apps[0])
+    : apps.map((a) => ({ label: appLabel(root, a), icon: Smartphone, children: withVersion(a) }));
 
   return (
     <>
       <button ref={anchor} onClick={toggle} onMouseDown={(e) => e.stopPropagation()}
         title="Run a Flutter app">{children}</button>
       {at && <ContextMenu x={at.x} y={at.y} alignRight items={items} onClose={() => setAt(null)} />}
+      {dialog}
     </>
   );
 }

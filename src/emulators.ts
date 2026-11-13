@@ -7,8 +7,8 @@ import { notify, dismissNotification } from "../shim/ui.js";
 import { parseDevices, parseEmulators, type Device, type Emulator } from "./detect.js";
 
 /** Every emulator `flutter emulators` knows, running or not; none when the command fails. */
-export const listEmulators = (cwd: string): Promise<Emulator[]> =>
-  exec("flutter", ["emulators"], cwd).then((r) => parseEmulators(r.stdout), () => []);
+export const listEmulators = (cwd: string, flutter = "flutter"): Promise<Emulator[]> =>
+  exec(flutter, ["emulators"], cwd).then((r) => parseEmulators(r.stdout), () => []);
 
 /** The AVD a running emulator was started from (adb answers "Pixel_7\nOK"), or "" without adb. */
 const avdOf = (serial: string) =>
@@ -39,14 +39,14 @@ const BOOT_MS = 240_000;
  * emulator that was not there before, and has finished booting. Resolves to that device named
  * after the emulator, or to null with a notification saying why.
  */
-export async function startEmulator(emu: Emulator, before: Device[], cwd: string): Promise<Device | null> {
+export async function startEmulator(emu: Emulator, before: Device[], cwd: string, flutter = "flutter"): Promise<Device | null> {
   const key = `emulator:${emu.id}`;
   notify({ source: "Flutter", key, transient: true, sticky: true, title: "Starting the emulator…", body: emu.name });
   let failed = "";
   // Not awaited: flutter returns three seconds after starting the emulator, and the wait below is
   // what matters. An emulator that quits in those seconds (an AVD already running, no
   // acceleration), or an id that matches none, is reported in its output with exit code 0.
-  exec("flutter", ["emulators", "--launch", emu.id], cwd)
+  exec(flutter, ["emulators", "--launch", emu.id], cwd)
     .then((r) => {
       const said = `${r.stderr}\n${r.stdout}`.trim();
       if (r.code !== 0 || /exited with code|No emulator found|More than one emulator/.test(said)) failed = said || `exit code ${r.code}`;
@@ -56,7 +56,7 @@ export async function startEmulator(emu: Emulator, before: Device[], cwd: string
   const known = new Set(before.map((d) => d.id));
   let device: Device | undefined;
   for (const end = Date.now() + BOOT_MS; !failed && Date.now() < end; await sleep(2000)) {
-    device ??= await exec("flutter", ["devices", "--machine"], cwd)
+    device ??= await exec(flutter, ["devices", "--machine"], cwd)
       .then((r) => parseDevices(r.stdout).find((d) => d.emulator && !known.has(d.id)), () => undefined);
     if (device && await booted(device.id)) {
       dismissNotification("Flutter", key);

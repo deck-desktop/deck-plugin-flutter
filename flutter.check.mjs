@@ -548,4 +548,29 @@ assert.equal(d.runIsHere([{ id: "a", cwd: "D:/shop/app", folders: ["D:/shop/mobi
 assert.equal(d.runIsHere([{ id: "a", cwd: "D:/shop/app" }, { id: "b", cwd: "D:/x", folders: ["D:/shop/mobile"] }], "a", "D:/shop/mobile"), false);
 assert.equal(d.appLabel("D:/shop/app|D:/shop/mobile", "D:/shop/mobile/example"), "mobile/example");
 
+// ---- FVM: the pin file, the SDK's version, the folders searched, the release list ----------
+const fo = await build({ entryPoints: ["src/fvmpin.ts"], bundle: true, format: "esm", write: false, platform: "node" });
+const fp = await import(`data:text/javascript;base64,${Buffer.from(fo.outputFiles[0].text).toString("base64")}`);
+
+assert.equal(fp.pinFrom('{ "flutter": "3.24.0", "flavors": {} }'), "3.24.0", ".fvmrc (FVM 3 and later)");
+assert.equal(fp.pinFrom(undefined, '{"flutterSdkVersion":"stable"}'), "stable", "FVM 2's .fvm/fvm_config.json");
+assert.equal(fp.pinFrom('{"flutter":"  "}', '{"flutterSdkVersion":"3.10.0"}'), "3.10.0", "an empty pin falls through");
+assert.equal(fp.pinFrom("not json"), null);
+assert.equal(fp.pinFrom(), null);
+
+assert.equal(fp.versionFrom('{"frameworkVersion":"3.44.3","channel":"stable"}'), "3.44.3");
+assert.equal(fp.versionFrom(undefined, "3.7.12\n"), "3.7.12", "an older SDK's root version file");
+assert.equal(fp.versionFrom("{}", undefined), null);
+
+assert.deepEqual(fp.parentsOf("D:\\work\\shop\\app"), ["D:\\work\\shop\\app", "D:\\work\\shop", "D:\\work", "D:\\"]);
+assert.deepEqual(fp.parentsOf("/home/me/app/"), ["/home/me/app", "/home/me", "/home", "/"]);
+
+const rel = JSON.stringify({ versions: [
+  { version: "3.51.0-0.1.pre", channel: "beta" }, { version: "3.50.0", channel: "stable" },
+  { version: "3.50.0-0.4.pre", channel: "beta" }, { version: "3.44.3", channel: "stable" }, { version: "x" },
+] });
+assert.deepEqual(fp.releasesFrom(rel).map((r) => r.version), ["3.50.0", "3.44.3", "3.51.0-0.1.pre"], "stable first, then the newest beta");
+assert.deepEqual(fp.releasesFrom(rel, 1).map((r) => r.version), ["3.50.0", "3.51.0-0.1.pre"]);
+assert.deepEqual(fp.releasesFrom("oops"), []);
+
 console.log("flutter.check.mjs: all assertions passed");
