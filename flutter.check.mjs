@@ -565,12 +565,12 @@ assert.equal(fp.versionFrom("{}", undefined), null);
 assert.deepEqual(fp.parentsOf("D:\\work\\shop\\app"), ["D:\\work\\shop\\app", "D:\\work\\shop", "D:\\work", "D:\\"]);
 assert.deepEqual(fp.parentsOf("/home/me/app/"), ["/home/me/app", "/home/me", "/home", "/"]);
 
-const rel = JSON.stringify({ versions: [
-  { version: "3.51.0-0.1.pre", channel: "beta" }, { version: "3.50.0", channel: "stable" },
-  { version: "3.50.0-0.4.pre", channel: "beta" }, { version: "3.44.3", channel: "stable" }, { version: "x" },
-] });
-assert.deepEqual(fp.releasesFrom(rel).map((r) => r.version), ["3.50.0", "3.44.3", "3.51.0-0.1.pre"], "stable first, then the newest beta");
-assert.deepEqual(fp.releasesFrom(rel, 1).map((r) => r.version), ["3.50.0", "3.51.0-0.1.pre"]);
-assert.deepEqual(fp.releasesFrom("oops"), []);
+const r = fp.releasesFrom(JSON.stringify({ versions: [
+  { version: "3.51.0-0.1.pre", channel: "beta" }, { version: "3.50.0", channel: "stable" }, { version: "3.47.9", channel: "stable" },
+  { version: "3.50.0-0.4.pre", channel: "beta" }, { version: "3.47.8", channel: "stable" }, { version: "x" },
+] }));
+assert.deepEqual(r.stable, [{ minor: "3.50", versions: ["3.50.0"] }, { minor: "3.47", versions: ["3.47.9", "3.47.8"] }], "every stable release, by minor, newest first");
+assert.equal(r.beta, "3.51.0-0.1.pre", "the newest beta");
+assert.deepEqual(fp.releasesFrom("oops"), { stable: [], beta: null });
 
 console.log("flutter.check.mjs: all assertions passed");

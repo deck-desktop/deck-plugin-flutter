@@ -8,7 +8,7 @@
 import { exec, fsList, fsRead, fsSize, fsHomeDir, isWindows, openExternal } from "../shim/bridge.js";
 import { notify } from "../shim/ui.js";
 import { getLayout, openTabInWorkspace, queueInput } from "../shim/terminals.js";
-import { PATH_CHOICE, parentsOf, pinFrom, releasesFrom, versionFrom } from "./fvmpin.js";
+import { PATH_CHOICE, parentsOf, pinFrom, releasesFrom, versionFrom, type Releases } from "./fvmpin.js";
 
 export { PATH_CHOICE };
 
@@ -131,9 +131,9 @@ export async function installedVersions(): Promise<string[]> {
 }
 
 /** The newest releases FVM can install, fetched once a session and only when asked for. */
-let releaseList: Promise<{ version: string; channel: string }[]> | null = null;
+let releaseList: Promise<Releases> | null = null;
 export function releases() {
-  releaseList ??= exec("fvm", ["api", "releases"]).then((o) => releasesFrom(o.stdout), () => []);
+  releaseList ??= exec("fvm", ["api", "releases"]).then((o) => releasesFrom(o.stdout), () => ({ stable: [], beta: null }));
   return releaseList;
 }
 

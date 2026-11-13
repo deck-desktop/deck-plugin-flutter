@@ -8,6 +8,7 @@ import { ConfirmDialog, notify, type ConfirmState, type MenuEntry } from "../shi
 import {
   FVM_DOCS, PATH_CHOICE, fvmInstalled, install, installedVersions, pathVersion, pickFor, pin, releases, sdkFor, sdkLabel, type Sdk,
 } from "./sdk.js";
+import type { Releases } from "./fvmpin.js";
 
 const nameOf = (app: string) => app.split(/[\\/]/).filter(Boolean).pop() ?? app;
 
@@ -16,7 +17,7 @@ export function useVersionMenu(open: boolean, apps: string[] | null) {
   /** Whether FVM is installed; null while it is still being asked (its first start takes a second). */
   const [fvmOn, setFvmOn] = useState<boolean | null>(null);
   const [versions, setVersions] = useState<string[] | null>(null);
-  const [rel, setRel] = useState<{ version: string; channel: string }[] | null>(null);
+  const [rel, setRel] = useState<Releases | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   /** The version of the Flutter on PATH, shown beside its row. */
   const [pathVer, setPathVer] = useState<string | null>(null);
@@ -79,9 +80,16 @@ export function useVersionMenu(open: boolean, apps: string[] | null) {
       else if (!versions.length) children.push({ label: "No versions installed with FVM", disabled: true });
       children.push("sep", {
         label: "Install another version", icon: Download,
+        // Every stable release, a row per minor version opening its patches, then the newest beta.
         children: rel === null ? [{ label: "Loading releases…", disabled: true }]
-          : !rel.length ? [{ label: "Could not list releases", disabled: true }]
-          : rel.map((r) => ({ label: r.version, subLabel: r.channel === "stable" ? undefined : r.channel, onClick: () => { install(r.version); } })),
+          : !rel.stable.length ? [{ label: "Could not list releases", disabled: true }]
+          : [
+            ...rel.stable.map((g): MenuEntry => ({
+              label: g.minor, subLabel: `newest ${g.versions[0]}`,
+              children: g.versions.map((v) => ({ label: v, onClick: () => { install(v); } })),
+            })),
+            ...(rel.beta ? ["sep" as const, { label: rel.beta, subLabel: "beta", onClick: () => { install(rel.beta!); } }] : []),
+          ],
       });
     } else {
       children.push({ label: "FVM is not installed", disabled: true },
