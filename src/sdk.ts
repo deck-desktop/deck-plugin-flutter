@@ -81,7 +81,7 @@ async function versionIn(root: string) {
 
 /** The Flutter on PATH and its version, found once a session; asked again while it has no answer. */
 let pathInfo: Promise<string | null> | null = null;
-function pathVersion() {
+export function pathVersion() {
   pathInfo ??= exec(isWindows() ? "where" : "which", ["flutter"]).then((o) => {
     const bin = o.stdout.split(/\r?\n/)[0]?.trim();
     // <sdk>/bin/flutter(.bat): the SDK is two levels up.

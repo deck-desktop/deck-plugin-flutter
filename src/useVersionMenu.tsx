@@ -6,7 +6,7 @@ import { Layers, Pin, Download, Terminal, BookOpen } from "lucide-react";
 import { openExternal } from "../shim/bridge.js";
 import { ConfirmDialog, notify, type ConfirmState, type MenuEntry } from "../shim/ui.js";
 import {
-  FVM_DOCS, PATH_CHOICE, fvmInstalled, install, installedVersions, pickFor, pin, releases, sdkFor, sdkLabel, type Sdk,
+  FVM_DOCS, PATH_CHOICE, fvmInstalled, install, installedVersions, pathVersion, pickFor, pin, releases, sdkFor, sdkLabel, type Sdk,
 } from "./sdk.js";
 
 const nameOf = (app: string) => app.split(/[\\/]/).filter(Boolean).pop() ?? app;
@@ -18,6 +18,8 @@ export function useVersionMenu(open: boolean, apps: string[] | null) {
   const [versions, setVersions] = useState<string[] | null>(null);
   const [rel, setRel] = useState<{ version: string; channel: string }[] | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
+  /** The version of the Flutter on PATH, shown beside its row. */
+  const [pathVer, setPathVer] = useState<string | null>(null);
 
   const resolve = (list: string[]) => Promise.all(list.map(async (a) => [a, await sdkFor(a)] as const))
     .then((pairs) => setSdks((m) => ({ ...m, ...Object.fromEntries(pairs) })));
@@ -26,6 +28,7 @@ export function useVersionMenu(open: boolean, apps: string[] | null) {
     if (!open || !apps?.length) return;
     let alive = true;
     void resolve(apps);
+    void pathVersion().then((v) => { if (alive) setPathVer(v); });
     void fvmInstalled().then((installed) => {
       if (!alive) return;
       setFvmOn(installed);
@@ -64,6 +67,7 @@ export function useVersionMenu(open: boolean, apps: string[] | null) {
     if (fvmOn === null) {
       children.push({ label: "Checking FVM…", disabled: true });
     } else if (fvmOn) {
+      if (versions?.length) children.push({ label: "Installed with FVM", disabled: true });
       for (const v of versions ?? []) children.push({
         label: v,
         subLabel: v === sdk.pin ? "pinned" : undefined,
@@ -83,7 +87,7 @@ export function useVersionMenu(open: boolean, apps: string[] | null) {
       children.push({ label: "FVM is not installed", disabled: true },
         { label: "How to install FVM", icon: BookOpen, onClick: () => { void openExternal(FVM_DOCS).catch((e) => console.warn("[flutter] could not open the FVM docs", e)); } });
     }
-    children.push({ label: "Use Flutter on PATH", icon: Terminal, checked: sdk.source === "path", onClick: () => choose(app, PATH_CHOICE) });
+    children.push({ label: "Use Flutter on PATH", hint: pathVer ?? undefined, icon: Terminal, checked: sdk.source === "path", onClick: () => choose(app, PATH_CHOICE) });
     return {
       label: `Flutter ${sdkLabel(sdk)}`,
       subLabel: sdk.missing ? "not installed" : sdk.picked ? "for this session" : sdk.pin ? "pinned in .fvmrc" : undefined,
