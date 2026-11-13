@@ -6,7 +6,7 @@ import { Layers, Pin, Download, Terminal, BookOpen } from "lucide-react";
 import { openExternal } from "../shim/bridge.js";
 import { ConfirmDialog, notify, type ConfirmState, type MenuEntry } from "../shim/ui.js";
 import {
-  FVM_DOCS, PATH_CHOICE, fvm, install, installedVersions, pickFor, pin, releases, sdkFor, sdkLabel, type Sdk,
+  FVM_DOCS, PATH_CHOICE, fvmInstalled, install, installedVersions, pickFor, pin, releases, sdkFor, sdkLabel, type Sdk,
 } from "./sdk.js";
 
 const nameOf = (app: string) => app.split(/[\\/]/).filter(Boolean).pop() ?? app;
@@ -26,7 +26,7 @@ export function useVersionMenu(open: boolean, apps: string[] | null) {
     if (!open || !apps?.length) return;
     let alive = true;
     void resolve(apps);
-    void fvm().then(({ installed }) => {
+    void fvmInstalled().then((installed) => {
       if (!alive) return;
       setFvmOn(installed);
       if (!installed) return;

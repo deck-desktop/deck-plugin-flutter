@@ -2,9 +2,9 @@
 // session from the run menu, or the Flutter on PATH, as before FVM support. Resolved when a menu
 // opens or a run starts, never on a poll; a run keeps the answer it started with.
 //
-// FVM itself is only asked where it has to be: once for its cache folder (`fvm api context`), and
-// for the actions a person clicks (pin, install, the release list). A machine without FVM, and a
-// project without a pin, never start it.
+// FVM itself is only started where it has to be: for its cache folder (`fvm api context`, once,
+// when a version is looked up there), the release list (once, when an FVM user opens the menu),
+// and the actions a person clicks (pin, install). Whether it is installed is a `where fvm`.
 import { exec, fsList, fsRead, fsSize, fsHomeDir, isWindows, openExternal } from "../shim/bridge.js";
 import { notify } from "../shim/ui.js";
 import { getLayout, openTabInWorkspace, queueInput } from "../shim/terminals.js";
@@ -31,7 +31,8 @@ const sep = () => (isWindows() ? "\\" : "/");
 const join = (...p: string[]) => p.join(sep());
 const script = () => (isWindows() ? "flutter.bat" : "flutter");
 const text = (p: string) => fsRead(p).then((t) => t, () => undefined); // a missing file is normal here
-const exists = (p: string) => fsSize(p).then(() => true, () => false);
+// fsSize answers 0 for a missing file rather than failing; a flutter script is never empty.
+const exists = (p: string) => fsSize(p).then((n) => n > 0, () => false);
 const key = (dir: string) => dir.replace(/[\\/]+$/, "").toLowerCase();
 
 /** The nearest folder at or above `dir` whose pin file names a version, and that version. */
@@ -43,38 +44,50 @@ export async function findPin(dir: string): Promise<{ dir: string; pin: string }
   return null;
 }
 
-/** Whether FVM is installed, and its versions folder. Asked once a session. */
-let fvmInfo: Promise<{ installed: boolean; versions: string }> | null = null;
-export function fvm() {
-  fvmInfo ??= exec("fvm", ["api", "context"]).then(async (o) => {
+/** Whether FVM is installed: on PATH, found without starting it. Asked once a session. */
+let fvmOn: Promise<boolean> | null = null;
+export function fvmInstalled() {
+  fvmOn ??= exec(isWindows() ? "where" : "which", ["fvm"]).then((o) => o.code === 0 && !!o.stdout.trim(), () => false);
+  return fvmOn;
+}
+
+/**
+ * FVM's versions folder. Asks FVM (`fvm api context`) once, and only when a version has to be found
+ * in its cache; without FVM, its default `~/fvm/versions`.
+ */
+let cacheDir: Promise<string> | null = null;
+export function versionsDir() {
+  cacheDir ??= (async () => {
+    const fallback = join(await fsHomeDir(), "fvm", "versions");
+    if (!(await fvmInstalled())) return fallback;
+    const o = await exec("fvm", ["api", "context"]).catch((e) => { console.warn("[flutter] fvm api context failed", e); return null; });
+    if (!o || o.code !== 0) return fallback;
     // Its context also lists the environment, so only the one field is kept and nothing of the
     // output is logged. Anything printed around the JSON (an update notice) is skipped.
-    let dir: string | undefined;
     try {
       const json = o.stdout.slice(o.stdout.indexOf("{"), o.stdout.lastIndexOf("}") + 1);
-      dir = (JSON.parse(json) as { context?: { versionsCachePath?: string } }).context?.versionsCachePath;
-    } catch { console.warn("[flutter] fvm api context did not print its JSON; using ~/fvm"); }
-    return { installed: o.code === 0, versions: dir || join(await fsHomeDir(), "fvm", "versions") };
-  }).catch(async (e) => {
-    // Expected on a machine without FVM: "fvm" is not a program there.
-    console.info("[flutter] FVM not found", String(e));
-    return { installed: false, versions: join(await fsHomeDir(), "fvm", "versions") };
-  });
-  return fvmInfo;
+      return (JSON.parse(json) as { context?: { versionsCachePath?: string } }).context?.versionsCachePath || fallback;
+    } catch {
+      console.warn("[flutter] fvm api context did not print its JSON; using ~/fvm/versions");
+      return fallback;
+    }
+  })();
+  return cacheDir;
 }
 
 async function versionIn(root: string) {
   return versionFrom(await text(join(root, "bin", "cache", "flutter.version.json")), await text(join(root, "version")));
 }
 
-/** The Flutter on PATH and its version, found once a session. */
+/** The Flutter on PATH and its version, found once a session; asked again while it has no answer. */
 let pathInfo: Promise<string | null> | null = null;
 function pathVersion() {
   pathInfo ??= exec(isWindows() ? "where" : "which", ["flutter"]).then((o) => {
     const bin = o.stdout.split(/\r?\n/)[0]?.trim();
     // <sdk>/bin/flutter(.bat): the SDK is two levels up.
     return bin ? versionIn(bin.split(/[\\/]/).slice(0, -2).join(sep())) : null;
-  }).catch(() => null);
+  }).catch((e) => { console.warn("[flutter] could not find the Flutter on PATH", e); return null; })
+    .then((v) => { if (!v) pathInfo = null; return v; });
   return pathInfo;
 }
 
@@ -90,10 +103,13 @@ export async function sdkFor(app: string): Promise<Sdk> {
   const pin = found?.pin ?? null;
   const choice = picked.get(key(app)) ?? pin;
   if (choice && choice !== PATH_CHOICE) {
-    // `fvm use` links the project's .fvm/flutter_sdk to the pinned SDK; a picked version has no link.
+    // `fvm use` links the project's .fvm/flutter_sdk to the pinned SDK and writes the version beside
+    // it (.fvm/release: the pin as written). A link whose release is not the pin is stale (the pin changed in a pull,
+    // without an `fvm use`), so the cache is used instead. A picked version has no link.
     // FVM itself is asked for its cache only after that, since its first start can take seconds.
-    const link = found && choice === pin ? join(found.dir, ".fvm", "flutter_sdk") : null;
-    for (const root of [link, async () => join((await fvm()).versions, choice)]) {
+    const fvmDir = found ? join(found.dir, ".fvm") : "";
+    const link = found && choice === pin && (await text(join(fvmDir, "release")))?.trim() === pin ? join(fvmDir, "flutter_sdk") : null;
+    for (const root of [link, async () => join(await versionsDir(), choice)]) {
       if (!root) continue;
       const dir = typeof root === "string" ? root : await root();
       const exe = join(dir, "bin", script());
@@ -109,7 +125,7 @@ export const sdkLabel = (s: Sdk) => `${s.version ?? "Flutter"} · ${s.source ===
 
 /** The versions FVM has installed, by folder name. */
 export async function installedVersions(): Promise<string[]> {
-  const { versions } = await fvm();
+  const versions = await versionsDir();
   // Not filtered on `dir`: a version can be a link (a custom SDK, `fvm fork`), which lists as a file.
   return fsList(versions).then((l) => l.filter((e) => !e.name.startsWith(".")).map((e) => e.name), () => []);
 }
@@ -121,9 +137,16 @@ export function releases() {
   return releaseList;
 }
 
-/** Pin a version for the project in `app`: `fvm use`, which writes .fvmrc there. */
+/**
+ * Pin a version for the project in `app`: `fvm use`, which writes .fvmrc there. Given a minute: FVM
+ * holds a lock while another of its commands runs, so a `fvm use` behind an install that waits on a
+ * prompt waits too, and would otherwise say nothing at all.
+ */
 export async function pin(app: string, version: string) {
-  const o = await exec("fvm", ["use", version, "--skip-pub-get"], app);
+  // ponytail: the timed-out `fvm use` is left running until FVM's lock frees or Deck exits.
+  const late = new Promise<never>((_, fail) => setTimeout(() => fail(new Error(
+    `fvm use did not finish within a minute. Another FVM command may be waiting (an install in a terminal); run "fvm use ${version}" in the project to see why.`)), 60_000));
+  const o = await Promise.race([exec("fvm", ["use", version, "--skip-pub-get"], app), late]);
   if (o.code !== 0) throw new Error((o.stderr || o.stdout).trim().split(/\r?\n/).pop() || `fvm use exited with ${o.code}`);
   pickFor(app, null);
 }
@@ -145,8 +168,8 @@ export const FVM_DOCS = "https://fvm.app/documentation/getting-started/installat
  * with FVM (or read how to get FVM), or run once on the Flutter on PATH. `retry` starts the run.
  */
 export async function askToInstall(app: string, sdk: Sdk, retry: () => void) {
-  const name = app.split(/[\/]/).filter(Boolean).pop() ?? "this app";
-  const { installed } = await fvm();
+  const name = app.split(/[\\/]/).filter(Boolean).pop() ?? "this app";
+  const installed = await fvmInstalled();
   const onPath = await pathVersion();
   const actions: { label: string; primary?: boolean; run: () => void }[] = [];
   if (installed) actions.push({ label: "Install with FVM", primary: true, run: () => { install(sdk.version ?? ""); } });
