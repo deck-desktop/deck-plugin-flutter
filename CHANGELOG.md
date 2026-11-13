@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.7.0 (2026-11-13)
 
 - FVM: an app runs on the Flutter its project pins (.fvmrc), and the run menu says which Flutter
   that is. Its version row lets you use another installed version for this session, pin one for
