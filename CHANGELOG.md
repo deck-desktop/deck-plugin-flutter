@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- FVM: an app runs on the Flutter its project pins (.fvmrc), and the run menu says which Flutter
+  that is. Its version row lets you use another installed version for this session, pin one for
+  the project (`fvm use`, after a confirm), install a release in a terminal (`fvm install`), or use
+  the Flutter on PATH. A pinned version that is not installed says so, with Install with FVM (or
+  How to install FVM) and Run with the PATH version. The log's first line, the run's tab and the
+  footer's tooltip name the SDK. Without FVM and without a pin, nothing changes.
+
 ## 1.6.0 (2026-11-12)
 
 - In a project with several folders (Deck 1.17.3), Flutter finds the apps in every folder.
