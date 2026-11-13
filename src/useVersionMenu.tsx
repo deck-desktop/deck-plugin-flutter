@@ -51,11 +51,14 @@ export function useVersionMenu(open: boolean, apps: string[] | null) {
     },
   });
 
-  /** The row for one app, or null where versions mean nothing: no FVM and no pin. */
-  const versionRow = (app: string): MenuEntry | null => {
+  /**
+   * The row for one app; null where versions mean nothing (no FVM and no pin), and "pending" while
+   * its SDK, or whether FVM is installed, is still being found.
+   */
+  const versionRow = (app: string): MenuEntry | null | "pending" => {
     const sdk = sdks[app];
-    if (!sdk) return { label: "Finding Flutter…", icon: Layers, disabled: true };
-    if (!fvmOn && !sdk.pin && !sdk.picked) return null;
+    if (!sdk) return "pending";
+    if (!sdk.pin && !sdk.picked) { if (fvmOn === null) return "pending"; if (!fvmOn) return null; }
     const current = sdk.source === "path" ? PATH_CHOICE : (sdk.picked ? null : sdk.pin) ?? sdk.version;
     const children: MenuEntry[] = [];
     if (fvmOn === null) {

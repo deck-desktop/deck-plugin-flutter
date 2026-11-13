@@ -97,10 +97,13 @@ export function DevicePicker({ root, onPick, children }: {
     return on.length && off.length ? [...on, "sep", ...off] : [...on, ...off];
   };
 
-  // Which Flutter it runs on comes first, where FVM is in play (useVersionMenu).
+  // Which Flutter it runs on, where FVM is in play (useVersionMenu), below the devices. Nothing
+  // shows until the devices and the version have both answered, so the menu fills in one go, and
+  // the version row is not under the cursor to open its submenu as the menu appears.
   const withVersion = (app: string): MenuEntry[] => {
     const row = versionRow(app);
-    return row ? [row, "sep", ...deviceItems(app)] : deviceItems(app);
+    if (devices === null || row === "pending") return [{ label: "Finding devices…", disabled: true }];
+    return row ? [...deviceItems(app), "sep", row] : deviceItems(app);
   };
 
   const items: MenuEntry[] =
