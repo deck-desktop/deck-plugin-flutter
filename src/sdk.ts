@@ -1,11 +1,12 @@
-// Which Flutter SDK runs an app: the one its project pins with FVM (fvm.app), one picked for this
-// session from the run menu, or the Flutter on PATH, as before FVM support. Resolved when a menu
+// Which Flutter SDK runs an app: the one its project pins with FVM (fvm.app), one picked for it from
+// the run menu (kept, per project folder, until another is picked or one is pinned), or the Flutter
+// on PATH, as before FVM support. Resolved when a menu
 // opens or a run starts, never on a poll; a run keeps the answer it started with.
 //
 // FVM itself is only started where it has to be: for its cache folder (`fvm api context`, once,
 // when a version is looked up there), the release list (once, when an FVM user opens the menu),
 // and the actions a person clicks (pin, install). Whether it is installed is a `where fvm`.
-import { exec, fsList, fsRead, fsSize, fsHomeDir, isWindows, openExternal } from "../shim/bridge.js";
+import { configRead, configWrite, exec, fsList, fsRead, fsSize, fsHomeDir, isWindows, openExternal } from "../shim/bridge.js";
 import { notify } from "../shim/ui.js";
 import { getLayout, openTabInWorkspace, queueInput } from "../shim/terminals.js";
 import { PATH_CHOICE, parentsOf, pinFrom, releasesFrom, versionFrom, type Releases } from "./fvmpin.js";
@@ -23,7 +24,7 @@ export interface Sdk {
   pin: string | null;
   /** The pinned or picked version is not installed, so nothing can run on it yet. */
   missing?: boolean;
-  /** Picked from the run menu for this session rather than pinned. */
+  /** Picked from the run menu (on this PC) rather than pinned in the project. */
   picked?: boolean;
 }
 
@@ -91,17 +92,28 @@ export function pathVersion() {
   return pathInfo;
 }
 
-/** Versions picked from the run menu, by app folder, for this session. */
-const picked = new Map<string, string>();
+/** Versions picked from the run menu (or PATH_CHOICE), by app folder, kept in the plugin's config so a
+ *  project keeps its choice across restarts. Read once; written only when a choice changes. */
+const PICKS = "sdk-picks";
+let picks: Promise<Record<string, string>> | null = null;
+const loadPicks = () => (picks ??= configRead(PICKS).then(
+  (t): Record<string, string> => { try { return t ? JSON.parse(t) : {}; } catch { return {}; } },
+  (): Record<string, string> => ({}), // none saved yet: normal
+));
 export function pickFor(app: string, version: string | null) {
-  if (version) picked.set(key(app), version); else picked.delete(key(app));
+  void loadPicks().then((m) => {
+    const k = key(app);
+    if ((m[k] ?? null) === version) return;
+    if (version) m[k] = version; else delete m[k];
+    return configWrite(PICKS, JSON.stringify(m));
+  }).catch((e) => console.warn("[flutter] saving the picked Flutter version failed", e));
 }
 
 /** The SDK an app in `app` runs on now. */
 export async function sdkFor(app: string): Promise<Sdk> {
   const found = await findPin(app);
   const pin = found?.pin ?? null;
-  const choice = picked.get(key(app)) ?? pin;
+  const choice = (await loadPicks())[key(app)] ?? pin;
   if (choice && choice !== PATH_CHOICE) {
     // `fvm use` links the project's .fvm/flutter_sdk to the pinned SDK and writes the version beside
     // it (.fvm/release: the pin as written). A link whose release is not the pin is stale (the pin changed in a pull,

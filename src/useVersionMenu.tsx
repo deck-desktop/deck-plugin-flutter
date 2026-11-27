@@ -1,5 +1,5 @@
 // The run menu's version row: which Flutter an app will run on, and a submenu to pick another for
-// this session, pin one with FVM, install one, or use the Flutter on PATH. Resolved each time the
+// it (remembered for the project), pin one with FVM, install one, or use the Flutter on PATH. Resolved each time the
 // menu opens; nothing here polls.
 import { useEffect, useState } from "react";
 import { Layers, Pin, Download, Terminal, BookOpen } from "lucide-react";
@@ -40,7 +40,7 @@ export function useVersionMenu(open: boolean, apps: string[] | null) {
     return () => { alive = false; };
   }, [open, apps]);
 
-  /** Use a version for this session (or PATH's Flutter), then show the row with it ticked. */
+  /** Use a version for this app from now on (or PATH's Flutter), then show the row with it ticked. */
   const choose = (app: string, v: string) => { pickFor(app, v); void resolve([app]); };
 
   const askPin = (app: string, v: string) => setConfirm({
@@ -98,7 +98,7 @@ export function useVersionMenu(open: boolean, apps: string[] | null) {
     children.push({ label: "Use Flutter on PATH", hint: pathVer ?? undefined, icon: Terminal, checked: sdk.source === "path", onClick: () => choose(app, PATH_CHOICE) });
     return {
       label: `Flutter ${sdkLabel(sdk)}`,
-      subLabel: sdk.missing ? "not installed" : sdk.picked ? "for this session" : sdk.pin ? "pinned in .fvmrc" : undefined,
+      subLabel: sdk.missing ? "not installed" : sdk.picked ? "picked here" : sdk.pin ? "pinned in .fvmrc" : undefined,
       icon: Layers,
       children,
     };
