@@ -25,6 +25,7 @@ import { isFlutterRun, projectRoot, runForFile, runIsHere, type FlutterRun, type
 import { StatusItem } from "../shim/ui.js";
 import { parseStackFrame, frameFile } from "./daemon.js";
 import * as store from "./store.js";
+import { SELECT_RUN, disposeSidebar } from "./sidebar.js";
 import { matcher, regexSyntax, validRegex } from "./filter.js";
 import { NetworkView } from "./network.js";
 import { appsIn, appsCache, currentCwd } from "./apps.js";
@@ -295,6 +296,8 @@ export function Panel() {
   const layout = useLayout();
   const runs = runsHere(useRuns(), layout);
   const [selected, setSelected] = useState<string | null>(prefs.selected ?? null);
+  // A run picked in Deck's sidebar (sidebar.ts).
+  useEffect(() => { const pick = (e: Event) => setSelected((e as CustomEvent<string>).detail); window.addEventListener(SELECT_RUN, pick); return () => window.removeEventListener(SELECT_RUN, pick); }, []);
   const [launchable, setLaunchable] = useState(false);
   const [q, setQ] = useState(prefs.q ?? "");
   const [wrap, setWrap] = useState(prefs.wrap ?? true);
@@ -698,6 +701,7 @@ export const PaneView = Panel;
 /** Called by Deck before a reload re-imports this plugin: the old copy's MCP listener and its
  *  reload-on-save handler go, or every save would hot-reload once per copy. */
 export function dispose() {
+  disposeSidebar();
   store.dispose();
   if (onSaved) window.removeEventListener("deck-file-saved", onSaved);
 }
