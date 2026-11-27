@@ -15,7 +15,7 @@
 //
 // The second is not a fallback for the first. Typing `flutter run` in a pane is a normal thing to
 // do, and the footer buttons should work for it.
-import { memo, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   Zap, RotateCw, Square, Play, Smartphone, X, Copy, Trash2, WrapText, Clock, ScrollText, ArrowDownUp, Search,
 } from "lucide-react";
@@ -194,6 +194,34 @@ function sameHead(l: store.LogLine, prev?: store.LogLine): boolean {
  */
 // Memoised: a line never changes once logged, so a re-render of the log (ten a second while a run
 // is chatty) re-parses only the new lines' stack frames, not all 5000.
+/**
+ * One log line with its clock and logger columns. Memoised, so a new line (a publish while the app
+ * logs) draws only itself, not the thousands before it; and `content-visibility`, so the browser lays
+ * out and paints only the lines on screen. Opening a long log was slow from both.
+ */
+const LogRow = memo(function LogRow({ line: l, prev, clock, wrap, cwd, pkg }: {
+  line: store.LogLine; prev?: store.LogLine; clock: string; wrap: boolean; cwd: string; pkg: string;
+}) {
+  return (
+    <div className={`flex gap-2 px-1 hover:bg-white/5 ${wrap ? "whitespace-pre-wrap break-words" : "whitespace-pre"}`}
+      style={{ contentVisibility: "auto", containIntrinsicSize: "auto 16.5px" }}>
+      {clock !== "off" && (
+        // Blank rather than absent on a repeat: the column keeps its width, so the text
+        // stays aligned instead of stepping left on every continuation line.
+        <span className="shrink-0 text-text-muted">
+          {sameHead(l, prev) ? " ".repeat(8) : time(clock === "app" ? l.appTs ?? l.ts : l.ts)}
+        </span>
+      )}
+      {l.logger && (
+        <span className="shrink-0 text-text-muted">
+          {sameHead(l, prev) ? " ".repeat(l.logger.length + 2) : `[${l.logger}]`}
+        </span>
+      )}
+      <LogText line={l} cwd={cwd} pkg={pkg} />
+    </div>
+  );
+});
+
 const LogText = memo(function LogText({ line, cwd, pkg }: { line: store.LogLine; cwd: string; pkg: string }) {
   const f = parseStackFrame(line.text);
   if (!f) return <span className={`min-w-0 flex-1 ${LOG_COLOR[line.kind]}`}>{line.text}</span>;
@@ -309,10 +337,12 @@ export function Panel() {
 
   const lines = active?.log ?? [];
   // Matched against the logger name too, so `/^AppLog$/` narrows to one logger's output.
-  const match = matcher(q);
-  const shown = q.trim()
-    ? lines.filter((l) => match(l.text) || match(l.logger ?? ""))
-    : lines;
+  // The log is appended to in place (store.ts), so its newest line says when it changed; redone only then.
+  const newest = lines.length ? lines[lines.length - 1].id : 0;
+  const shown = useMemo(() => {
+    const match = matcher(q);
+    return q.trim() ? lines.filter((l) => match(l.text) || match(l.logger ?? "")) : lines;
+  }, [lines, newest, q]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Follow the tail — but only when already at the bottom, so scrolling back to read something is
   // not yanked away by the next line of output. A ref, not state: it changes on every scroll and
@@ -326,7 +356,7 @@ export function Panel() {
   useEffect(() => {
     const el = logRef.current;
     if (el && atBottom.current) el.scrollTop = el.scrollHeight;
-  }, [shown.length]);
+  }, [shown.length, newest]);
 
   // Ctrl+C on a selection. Deck runs in a WebView2 with no application menu, so the native copy
   // accelerator never fires — without this you can highlight log text but not copy it.
@@ -530,24 +560,7 @@ export function Panel() {
       <div ref={logRef} onScroll={onScroll} tabIndex={0} onKeyDown={onKeyDown}
         className={`scroll-thin flex-1 overflow-y-auto px-2 py-1 font-mono text-[11px] leading-[1.5] outline-none ${
           wrap ? "" : "overflow-x-auto"}`}>
-        {shown.map((l, i) => (
-          <div key={l.id}
-            className={`flex gap-2 px-1 hover:bg-white/5 ${wrap ? "whitespace-pre-wrap break-words" : "whitespace-pre"}`}>
-            {clock !== "off" && (
-              // Blank rather than absent on a repeat: the column keeps its width, so the text
-              // stays aligned instead of stepping left on every continuation line.
-              <span className="shrink-0 text-text-muted">
-                {sameHead(l, shown[i - 1]) ? " ".repeat(8) : time(clock === "app" ? l.appTs ?? l.ts : l.ts)}
-              </span>
-            )}
-            {l.logger && (
-              <span className="shrink-0 text-text-muted">
-                {sameHead(l, shown[i - 1]) ? " ".repeat(l.logger.length + 2) : `[${l.logger}]`}
-              </span>
-            )}
-            <LogText line={l} cwd={active?.cwd ?? ""} pkg={pkg} />
-          </div>
-        ))}
+        {shown.map((l, i) => <LogRow key={l.id} line={l} prev={shown[i - 1]} clock={clock} wrap={wrap} cwd={active?.cwd ?? ""} pkg={pkg} />)}
         {!shown.length && (
           <div className="px-1 py-3 font-sans text-[12px] text-text-muted">
             {lines.length ? "Nothing matches this filter. Clear it to see every line." : "Waiting for output…"}
