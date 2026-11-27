@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.8.0 (2026-11-27)
+
+- A running app shows under its project in Deck's workspace sidebar, with its device and whether it
+  runs. A click opens its log; a right-click hot reloads, hot restarts or stops it, or runs it again
+  once it has ended. Needs Deck 1.20.0.
+- A Flutter version picked in the run menu is remembered for each project.
+- A long log opens fast, and keeps following once it is full.
+
 ## 1.7.0 (2026-11-13)
 
 - FVM: an app runs on the Flutter its project pins (.fvmrc), and the run menu says which Flutter
