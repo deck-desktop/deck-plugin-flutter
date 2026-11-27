@@ -26,7 +26,8 @@ const rowOf = (r: store.Run): SidebarRow => ({
   },
 });
 
-const publish = () => setSidebarRows(store.getRuns().map(rowOf));
+// A Deck from before the sidebar module has none: the rows are simply not shown there.
+const publish = () => { try { setSidebarRows(store.getRuns().map(rowOf)); } catch { /* no sidebar module */ } };
 const un = store.subscribe(publish);
 publish();
 
